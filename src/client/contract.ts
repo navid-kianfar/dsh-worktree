@@ -1,0 +1,136 @@
+/**
+ * The injected business faces of this plugin's two seats.
+ *
+ * Both are declared here rather than beside their components, because the registrations in
+ * `./index.ts` build them and every component in the surface consumes them: one home keeps the two
+ * sides of each face from drifting.
+ * @module @achasoft/dsh-worktree/client/contract
+ */
+
+import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import type {
+  AddWorktreeRequest, AddWorktreeResult, CheckoutRequest, CreateBranchRequest, DeleteBranchRequest,
+  LockWorktreeRequest, MutationResult, OverviewResult, RemoveWorktreeRequest, RenameBranchRequest,
+  SuggestPathResult, WorktreeSettings, WorktreeView,
+} from '../host/types.ts'
+
+/** Every git operation the surface can start, with the workspace path already bound. */
+export interface WorktreeCommands {
+  /**
+   * Read the repository the current session's workspace sits in.
+   * @param signal - abandons the reading when a newer one supersedes it.
+   * @returns the reading, or a classified failure.
+   */
+  overview: (signal?: AbortSignal) => Promise<OverviewResult>
+  /**
+   * Update remote-tracking refs and drop the ones whose remote branch is gone.
+   * @returns git's summary, or a classified failure.
+   */
+  fetch: () => Promise<MutationResult>
+  /**
+   * Move the workspace's worktree onto a branch.
+   * @param request - the branch, and whether to carry uncommitted changes.
+   * @returns git's summary, or a classified failure.
+   */
+  checkout: (request: Omit<CheckoutRequest, 'workspacePath'>) => Promise<MutationResult>
+  /**
+   * Create a branch, optionally switching onto it.
+   * @param request - the name, its start point, and whether to switch.
+   * @returns git's summary, or a classified failure.
+   */
+  createBranch: (request: Omit<CreateBranchRequest, 'workspacePath'>) => Promise<MutationResult>
+  /**
+   * Delete a local branch.
+   * @param request - the branch, and whether to delete an unmerged one.
+   * @returns git's summary, or a classified failure.
+   */
+  deleteBranch: (request: Omit<DeleteBranchRequest, 'workspacePath'>) => Promise<MutationResult>
+  /**
+   * Rename a local branch.
+   * @param request - the branch and its new name.
+   * @returns git's summary, or a classified failure.
+   */
+  renameBranch: (request: Omit<RenameBranchRequest, 'workspacePath'>) => Promise<MutationResult>
+  /**
+   * Expand the configured path template for a branch and report what is already there.
+   * @param branch - the branch the worktree would hold.
+   * @param signal - abandons the suggestion when the typed branch name moves on.
+   * @returns the suggestion, or a classified failure.
+   */
+  suggestPath: (branch: string, signal?: AbortSignal) => Promise<SuggestPathResult>
+  /**
+   * Add a worktree.
+   * @param request - the destination, the branch, and how to check it out.
+   * @returns the created worktree, or a classified failure.
+   */
+  addWorktree: (request: Omit<AddWorktreeRequest, 'workspacePath'>) => Promise<AddWorktreeResult>
+  /**
+   * Remove a worktree.
+   * @param request - the worktree path, and whether to remove one holding uncommitted work.
+   * @returns git's summary, or a classified failure.
+   */
+  removeWorktree: (request: Omit<RemoveWorktreeRequest, 'workspacePath'>) => Promise<MutationResult>
+  /**
+   * Lock or unlock a worktree.
+   * @param request - the worktree path, the target state, and an optional lock reason.
+   * @returns git's summary, or a classified failure.
+   */
+  lockWorktree: (request: Omit<LockWorktreeRequest, 'workspacePath'>) => Promise<MutationResult>
+  /**
+   * Drop the administrative records of worktrees whose directories are gone.
+   * @returns git's summary, or a classified failure.
+   */
+  pruneWorktrees: () => Promise<MutationResult>
+}
+
+/** Injected business face of the session-header chip. */
+export interface WorktreeChipInjected {
+  /**
+   * Read what this surface is allowed to draw and how often to re-read.
+   * @param signal - abandons the probe when the seat unmounts.
+   * @returns the capability view.
+   */
+  describeWorktree: (signal?: AbortSignal) => Promise<WorktreeView>
+  /**
+   * Bind every git operation to one workspace directory.
+   * @param workspacePath - the workspace's canonical directory.
+   * @returns the bound command set.
+   */
+  commandsFor: (workspacePath: string) => WorktreeCommands
+  /**
+   * Adopt a directory as a harness Workspace, and optionally open a session in it.
+   *
+   * The Host cannot do this half: Workspaces and sessions are browser-runtime domains, so creating
+   * a worktree is a Host act and making it reachable from the sidebar is a client one.
+   * @param path - the worktree directory.
+   * @param openSession - open (or reuse) a session in the resulting Workspace.
+   */
+  adoptWorkspace: (path: string, openSession: boolean) => Promise<void>
+  /**
+   * Open a path with the Host operating system's default application.
+   * @param path - the directory to reveal.
+   */
+  revealPath: (path: string) => Promise<void>
+}
+
+/** Injected business face of the worktree settings card. */
+export interface WorktreeSettingsInjected {
+  /** Registrant-private reactive sources the renderer binds to `use<Name>` hooks. */
+  hooks: {
+    /** The bound `worktree` settings scope: resolved value, layers, revision, and writability. */
+    worktreeSettings: SettingsScope<WorktreeSettings>
+  }
+  /**
+   * Read the Host's capability view for the card's status line.
+   * @param signal - abandons the probe when the card unmounts.
+   * @returns the capability view.
+   */
+  describeWorktree: (signal?: AbortSignal) => Promise<WorktreeView>
+  /**
+   * Store one field of the `worktree` section; the bound scope owns revision fencing.
+   * @param field - the field name inside the namespace.
+   * @param value - the JSON-shaped value the control produced.
+   * @returns settlement after the write.
+   */
+  setField: (field: string, value: unknown) => Promise<void>
+}

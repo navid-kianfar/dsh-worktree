@@ -1,0 +1,71 @@
+# dsh-worktree — git worktrees and branches for the DeepSeek Harness Web Client.
+#
+# Both rows are always composed. Unlike a provider-backed capability there is
+# nothing deployment-specific to supply: the plugin reads whatever repository
+# each workspace already sits in, and a workspace that is not one renders no
+# control at all rather than a dead one.
+#
+# It does need two capabilities the base bundle already mounts — `ctx.subprocess`
+# to run git and `ctx.fs` to resolve paths. Without either, the settings card
+# says which one is missing and the header control stays hidden.
+#
+# Override any key from your profile's own cordis.patch.yml by `id`, restating
+# every key the row needs — a patch replaces a row's whole `config`.
+- insert:
+    - id: worktree
+      name: '@achasoft/dsh-worktree/host'
+      config:
+        showChip: true
+
+        # Where `worktree add` puts a directory when the browser sends no path.
+        # Placeholders: {repoRoot} {repoParent} {repo} {branch} {branchPath};
+        # a relative result resolves against {repoRoot}. The default keeps every
+        # worktree of one repository together in a sibling directory, so the
+        # repository itself never fills up with checkouts of itself.
+        # {branch} folds `/` to `-`, which keeps `feature/login` one directory;
+        # use {branchPath} instead to let a namespaced branch nest.
+        worktreePathTemplate: '{repoParent}/{repo}-worktrees/{branch}'
+
+        # Prefilled when creating a branch. Empty prefills nothing, which is the
+        # right default for a repository with no branch-naming convention.
+        branchPrefix: ''
+
+        # A worktree nobody can open is just a directory, so a created or opened
+        # one is adopted as a harness Workspace and a session starts there.
+        # openSession requires registerWorkspace: a session opens IN a Workspace,
+        # and the Host refuses the combination at load rather than silently
+        # ignoring it.
+        registerWorkspace: true
+        openSession: true
+
+        includeRemoteBranches: true
+        # Enough for any repository someone browses by name, and a ceiling that
+        # keeps one reading bounded on a repository with thousands of refs. The
+        # list says so when it truncated; the search box reaches the rest.
+        maxBranches: 200
+
+        # How often the header control re-reads. git status on a warm repository
+        # is cheap, and this is what keeps the dirty dot and ahead/behind honest
+        # while the agent works. 0 reads only on an explicit refresh.
+        refreshIntervalMs: 15000
+
+        gitTimeoutMs: 20000
+        # Never below gitTimeoutMs — a fetch that contacts a remote cannot be
+        # given less time than a local reading. The Host refuses that at load.
+        networkTimeoutMs: 120000
+
+        # One reading of a large repository's branch list is the biggest thing
+        # git prints here; a megabyte holds far more than maxBranches can.
+        maxOutputBytes: 1048576
+        graceMs: 5000
+
+        # Requires typing the branch or worktree name before a force-delete or a
+        # force-remove. The unforced forms are never gated: git refuses those
+        # itself when they would lose anything.
+        confirmDestructive: true
+
+    # The BARE package name, deliberately: the Web Client discovers a browser half
+    # by resolving `<row name>/package.json`, so a subpath row here would leave the
+    # header seat silently unserved.
+    - id: worktree-ui
+      name: '@achasoft/dsh-worktree'

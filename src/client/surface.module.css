@@ -1,0 +1,762 @@
+/* The worktree surface: the session-header chip, its two popovers, and the dialogs they open.
+ *
+ * One stylesheet for all four, because they are one control — the popovers inherit the chip's
+ * geometry and the dialogs reuse the popovers' rows. Every color is a `--dsw-*` token, so the whole
+ * surface follows the theme without a single literal. */
+
+/* --- chip --- */
+
+.root {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The segmented pill: two buttons sharing one border, divided by a hairline. */
+.pill {
+  display: inline-flex;
+  align-items: stretch;
+  height: 28px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-3);
+  overflow: hidden;
+}
+
+.segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 0 10px;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 26px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.segment:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.segment[aria-expanded='true'] {
+  background: var(--dsw-alias-interactive-bg-active);
+  color: var(--dsw-alias-label-primary);
+}
+
+.segment:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+}
+
+.segment:disabled {
+  cursor: default;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.segmentDivider {
+  composes: segment;
+  border-left: 1px solid var(--dsw-alias-border-l2);
+}
+
+.segmentIcon {
+  flex: none;
+  display: inline-flex;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.segmentText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Ahead/behind sits beside the branch name in the same tabular figures the panels use. */
+.segmentTrack {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* One dot for "something is uncommitted here" — the chip has no room for four counters, and the
+   branch popover shows the breakdown. */
+.dirtyDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+.count {
+  flex: none;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.add:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.add:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
+}
+
+.add:disabled {
+  cursor: default;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* --- popover --- */
+
+.panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 100;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  max-width: min(340px, calc(100vw - 32px));
+  border: 1px solid var(--dsw-alias-border-inverted);
+  border-radius: 12px;
+  background: var(--dsw-specific-menu);
+  box-shadow: var(--dsw-shadow-lv3);
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: default;
+  overflow: hidden;
+}
+
+.panelHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 8px;
+}
+
+.panelTitle {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.iconButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.iconButton:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+}
+
+.iconButton:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.spin {
+  animation: dshWorktreeSpin 900ms linear infinite;
+}
+
+@keyframes dshWorktreeSpin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin { animation: none; }
+}
+
+.search {
+  margin: 0 12px 8px;
+}
+
+.searchInput {
+  box-sizing: border-box;
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.searchInput::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.searchInput:focus-visible {
+  outline: none;
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.list {
+  margin: 0;
+  padding: 0 6px 6px;
+  list-style: none;
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-color: var(--dsw-alias-scrollbar-bg-l1) transparent;
+}
+
+.groupLabel {
+  padding: 8px 6px 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+}
+
+.row:hover,
+.rowActive {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* The row body is the button; the trailing action control is a sibling, so a click on the name
+   switches and a click on the ellipsis opens the menu without the two overlapping. */
+.rowMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 4px 6px 8px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rowMain:disabled {
+  cursor: default;
+}
+
+.rowMain:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+
+.rowTop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rowName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-primary);
+}
+
+.rowNameCurrent {
+  composes: rowName;
+  font-weight: 600;
+}
+
+.rowMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.rowMetaText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.badgeWarn {
+  composes: badge;
+  background: var(--dsw-alias-state-warn-tertiary);
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.badgeAccent {
+  composes: badge;
+  background: var(--dsw-alias-state-success-tertiary);
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.track {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.rowActions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+}
+
+.empty {
+  padding: 14px 12px;
+  text-align: center;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.notice {
+  padding: 6px 12px 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.footerButton {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.footerButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.footerButton:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+}
+
+.footerButton:disabled {
+  cursor: default;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* The carry switch fills the footer it sits in, rather than being centered like a button would. */
+.footerToggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+/* --- per-row action menu ---
+ * Fixed and portaled to the body rather than positioned inside the row: the list scrolls and the
+ * popover clips, so a menu living in the row would be cut off by its own container. */
+
+.menu {
+  position: fixed;
+  z-index: 120;
+  min-width: 190px;
+  padding: 4px;
+  border: 1px solid var(--dsw-alias-border-inverted);
+  border-radius: 10px;
+  background: var(--dsw-specific-menu);
+  box-shadow: var(--dsw-shadow-lv3);
+}
+
+.menuItem {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.menuItem:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.menuItem:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+}
+
+.menuItem:disabled {
+  cursor: default;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.menuItemDanger {
+  composes: menuItem;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.menuItemDanger:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+}
+
+/* --- error strip, shared by the popovers and the dialogs --- */
+
+.error {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 12px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-state-error-secondary);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.errorDetail {
+  color: var(--dsw-alias-label-tertiary);
+  overflow-wrap: anywhere;
+}
+
+/* --- dialog body --- */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fieldLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.fieldHint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.fieldHintWarn {
+  composes: fieldHint;
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.fieldHintError {
+  composes: fieldHint;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.input::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.input:focus-visible {
+  outline: none;
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.input:disabled {
+  color: var(--dsw-alias-label-tertiary);
+  cursor: default;
+}
+
+.inputInvalid {
+  composes: input;
+  border-color: var(--dsw-alias-state-error-primary);
+}
+
+.select {
+  composes: input;
+  appearance: none;
+  padding-right: 30px;
+  /* The caret is drawn with the border token so it follows the theme like every other edge. */
+  background-image: linear-gradient(45deg, transparent 50%, var(--dsw-alias-label-tertiary) 50%),
+    linear-gradient(135deg, var(--dsw-alias-label-tertiary) 50%, transparent 50%);
+  background-position: calc(100% - 16px) calc(50% + 1px), calc(100% - 11px) calc(50% + 1px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+/* A two-button segmented switch for the create dialog's new/existing branch choice. */
+.choice {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-3);
+}
+
+.choiceOption {
+  padding: 4px 14px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.choiceOption[aria-pressed='true'] {
+  background: var(--dsw-alias-button-elevated-fill);
+  color: var(--dsw-alias-label-primary);
+}
+
+.choiceOption:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+}
+
+.toggleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toggleText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* The switch: same tokens as the inputs above, so it follows the theme rather than the user agent. */
+.switch {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-3);
+  cursor: pointer;
+  transition: background .16s, border-color .16s;
+}
+
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  border-radius: 999px;
+  background: var(--dsw-alias-label-tertiary);
+  transition: transform .16s, background .16s;
+}
+
+.switch:checked {
+  background: var(--dsw-alias-brand-primary);
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.switch:checked::after {
+  transform: translateX(14px);
+  background: var(--dsw-alias-bg-layer-3);
+}
+
+.switch:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+
+.switch:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.dialogFooter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+
+.button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.buttonGhost {
+  composes: button;
+  border-color: var(--dsw-alias-border-l2);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.buttonGhost:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.buttonPrimary {
+  composes: button;
+  background: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-label-primary-foreground);
+}
+
+.buttonPrimary:hover:not(:disabled) {
+  background: var(--dsw-alias-button-primary-hover);
+}
+
+.buttonDanger {
+  composes: button;
+  background: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+}
+
+.buttonDanger:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.dialogText {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+  overflow-wrap: anywhere;
+}
+
+.code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--dsw-alias-markdown-inline-code);
+  color: var(--dsw-alias-label-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
