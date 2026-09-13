@@ -9,11 +9,25 @@ A chip in the session header says which branch and which worktree the session is
    └ branch      └ worktree        └ new worktree
 ```
 
+The plugin also owns the **new-session row**, where a session is placed rather than inspected. It takes that seat by shadowing the core workspace picker at a lower slot priority, so no harness source is patched and uninstalling the plugin hands the seat straight back.
+
+```
+ 📁 my-repo ▾    [ Open Workspace ]    ☐ Worktree          ◇ Standard mode
+   └ project switcher                     └ run in a        └ the harness's own
+                                            git worktree      preset control
+```
+
 ## What it does
 
 **Branches** — list local and remote-tracking branches with their tip commit, author, age, and ahead/behind counters; filter them by fuzzy search; switch, create, rename, and delete. A branch already checked out in another worktree says so and jumps there instead of failing, because git refuses to check one branch out twice. `Fetch` updates remote-tracking refs and prunes the ones whose remote branch is gone.
 
 **Worktrees** — list every worktree of the repository with its branch, path, and lock or prunable state; open a session in one; lock, unlock, remove, and prune. Creating a worktree fills its directory from a configurable path template, then optionally registers it as a Workspace and starts a session in it.
+
+**Project switcher** — the session-start chip lists your Workspaces and switches between them. It is a switcher and nothing else: the core picker's trailing "Add workspace…" row is deliberately gone, because a menu whose job is choosing between projects should not also be the only way to create one.
+
+**Open Workspace** — a labelled button beside the switcher that opens the host's own folder chooser and starts a session in whatever it returns. This is the action the core picker buried as the last row of its menu.
+
+**Worktree checkbox** — tick it and the session runs in a **fresh git worktree** instead of the repository itself. The worktree is created at once, on a provisional branch, because a session can only be pointed at a directory that already exists; the branch is then **renamed from your first message** — by your deployment's own model, falling back to a slug of the prompt when no model is configured — so a task gets a name that describes it without anyone typing one. Unticking before you send removes the worktree and its provisional branch and returns you to the Workspace you came from.
 
 **Uncommitted work is never discarded.** A checkout with local changes uses `git switch --merge`, which carries them across and aborts on conflict. A force-delete or force-remove is a separate switch, and by default also needs the branch or worktree name typed to confirm.
 
@@ -22,6 +36,8 @@ A chip in the session header says which branch and which worktree the session is
 - DeepSeek Harness with the `web` app.
 - `git` on the host process PATH. `git switch` is used, so **git 2.23 or newer**; git 2.36 adds the NUL-separated worktree listing this plugin prefers and the `locked`/`prunable` attributes it reads, and below that it falls back cleanly.
 - The `@deepseek-ai/dsh-subprocess` and `@deepseek-ai/dsh-fs` capabilities, both of which the base bundle mounts. Without either, the header control stays hidden and the settings card says which one is missing.
+- A composed directory picker (`ui-directory-picker-native` or `-browse`, mounted automatically by the web app) for **Open Workspace**. Without one the button reports that no chooser exists and everything else keeps working.
+- Optional: a default model (`agentDefaultModel`) for the worktree branch name. Without one the name is the deterministic slug of your prompt.
 
 ## Install
 
@@ -83,7 +99,13 @@ The template must contain `{branch}` or `{branchPath}`; without one, every workt
 
 **A value from the browser becomes a git argument only after the host has proved what it names** — a branch through `rev-parse --verify`, a worktree path by matching git's own `worktree list`. The one path that skips that check, a new worktree's destination, must be absent or an empty directory.
 
-**Nothing here is model-facing.** Which branch you are on is operator context that never enters a prompt, so the plugin adds no tool, no prompt contribution, and no session event. The agent reaches git the way it always has: through the shell.
+**Nothing here is model-facing.** Which branch you are on is operator context that never enters a prompt, so the plugin adds no tool, no prompt contribution, and no session event. The agent reaches git the way it always has: through the shell. The one model call this plugin makes is its own — naming a worktree's branch — and its answer reaches git as a branch name, never as prompt text.
+
+**The new-session seat is taken by shadowing, not by forking the shell.** `ui-workspace` registers `conversation.hero.workspace` at the default slot priority and this plugin registers the same single seat at `-1`, which is the slot system's documented shadowing rule: the lowest live entry renders. The shell's folder chip, its draft-carrying workspace switch, and the composed directory-flow hole all keep working; only the menu's contents and the two controls beside it change.
+
+**A worktree is created before its name exists, and renamed after.** A session runs in a directory, so the directory has to exist before the session does — but the only thing worth naming a worktree after is the prompt, which is typed afterwards. So the branch starts on a random provisional name (`wt-<8 hex>`), the session is pointed at it, and a second seat in the session header renames it once the first message is admitted. The directory keeps the provisional name; the Workspace's display title is renamed too, so the switcher reads the branch name. Renaming the directory as well would move a Workspace out from under a live session, which is a worse trade than an unlovely folder name.
+
+**Unticking removes what ticking created, and only that.** The provisional branch is this plugin's own invention — nobody had it before the box was ticked — so unticking removes the worktree and then deletes that branch. `force: false` on the delete means a branch someone has since committed to is refused and kept; at that point the worktree is already gone and the commits are what matter.
 
 **Remote branches are never deleted.** Deleting one means pushing a deletion to somebody else's repository, which is not something a switcher popover should be able to do by accident.
 

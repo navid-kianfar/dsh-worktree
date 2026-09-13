@@ -128,6 +128,13 @@ const addWorktreeResult = `z.union([z.object({
   'detail': z.string().readonly(),
 }), ${gitFailure}])`
 
+const suggestBranchNameResult = `z.union([z.object({
+  'ok': z.literal(true).readonly(),
+  'name': z.string().readonly(),
+  'source': z.union([z.literal("model"), z.literal("fallback")]).readonly(),
+  'model': z.string().readonly().optional(),
+}), ${gitFailure}])`
+
 const suggestPathResult = `z.union([z.object({
   'ok': z.literal(true).readonly(),
   'path': z.string().readonly(),
@@ -138,6 +145,11 @@ const suggestPathResult = `z.union([z.object({
 /** A request object; `workspacePath` comes first because every request extends `RepoRequest`. */
 const request = (...members) => `z.object({
   'workspacePath': z.string().readonly(),${members.map(member => `\n  ${member}`).join('')}
+})`
+
+/** The one request that names no repository: naming is text work with nothing to resolve. */
+const suggestBranchNameRequest = `z.object({
+  'prompt': z.string().readonly(),
 })`
 
 const repoRequest = request()
@@ -240,6 +252,12 @@ const ENDPOINTS = [
     ) }],
     cancellation: true,
     result: { type: 'MutationResult', schema: mutationResult },
+  },
+  {
+    method: 'suggestBranchName',
+    params: [{ name: 'request', type: 'SuggestBranchNameRequest', schema: suggestBranchNameRequest }],
+    cancellation: true,
+    result: { type: 'SuggestBranchNameResult', schema: suggestBranchNameResult },
   },
   {
     method: 'suggestPath',

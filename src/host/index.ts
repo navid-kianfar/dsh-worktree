@@ -17,13 +17,14 @@ import z from '@deepseek-ai/schemastery'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { GitClient, fail } from './git.ts'
+import { suggestBranchName } from './naming.ts'
 import { WorktreeOperations } from './operations.ts'
 import { CommandUnavailableError } from './run.ts'
 import type {
   AddWorktreeRequest, AddWorktreeResult, CheckoutRequest, CreateBranchRequest, DeleteBranchRequest,
   GitFailure, LockWorktreeRequest, MutationResult, OverviewResult, RemoveWorktreeRequest,
-  RenameBranchRequest, RepoRequest, SuggestPathRequest, SuggestPathResult, WorktreeSettings,
-  WorktreeView,
+  RenameBranchRequest, RepoRequest, SuggestBranchNameRequest, SuggestBranchNameResult,
+  SuggestPathRequest, SuggestPathResult, WorktreeSettings, WorktreeView,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -224,6 +225,23 @@ export class WorktreeService extends TypertRemoteService {
   @Remote('renameBranch')
   async renameBranch(request: RenameBranchRequest, signal: AbortSignal): Promise<MutationResult> {
     return guard(() => this.operations.renameBranch(request, signal))
+  }
+
+  /**
+   * Suggest a branch name for the task one prompt describes.
+   *
+   * The only endpoint here that is not about a repository: the new-session surface creates a worktree
+   * before the prompt exists, so the name arrives after the fact from this call. A deployment with no
+   * model mounted answers with the deterministic slug rather than failing.
+   * @param request - the prompt to name from.
+   * @param signal - gateway-supplied cancellation for the caller's abandoned request.
+   * @returns the suggested name, or a classified failure for an unusable prompt.
+   */
+  @Remote('suggestBranchName')
+  async suggestBranchName(
+    request: SuggestBranchNameRequest, signal: AbortSignal,
+  ): Promise<SuggestBranchNameResult> {
+    return suggestBranchName(this.ctx, request.prompt, signal)
   }
 
   /**

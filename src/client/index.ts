@@ -27,18 +27,27 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 // namespace mounts and unmounts with this fiber, and no shipped source names `worktree`.
 import worktreeRemote from '../../generated/typert.remote-client.js'
 import type { WorktreeSettings } from '../host/types.ts'
-import type { WorktreeChipInjected, WorktreeCommands, WorktreeSettingsInjected } from './contract.ts'
+import type {
+  WorktreeChipInjected, WorktreeCommands, WorktreeHeroInjected, WorktreeNamingInjected,
+  WorktreeSettingsInjected,
+} from './contract.ts'
 import { WorktreeChip } from './WorktreeChip.tsx'
+import { HeroWorkspace } from './HeroWorkspace.tsx'
+import { WorktreeNaming } from './WorktreeNaming.tsx'
 import { WorktreeSettingsCard } from './WorktreeSettingsCard.tsx'
 import { en, zh, type WorktreeKey } from './locales.ts'
 
 export type {
-  WorktreeChipInjected, WorktreeCommands, WorktreeSettingsInjected,
+  WorktreeChipInjected, WorktreeCommands, WorktreeHeroInjected, WorktreeNamingInjected,
+  WorktreeSettingsInjected,
 } from './contract.ts'
 export type { WorktreeKey } from './locales.ts'
 export type { WorktreeChipProps } from './WorktreeChip.tsx'
+export type { HeroWorkspaceProps } from './HeroWorkspace.tsx'
+export type { WorktreeNamingProps } from './WorktreeNaming.tsx'
 export type { WorktreeSettingsCardProps } from './WorktreeSettingsCard.tsx'
 export type { WorktreeState } from './useWorktree.ts'
+export type { WorktreeIntent, WorktreeIntentStore } from './intents.ts'
 export type { RelativeAge } from './format.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -107,6 +116,23 @@ function surface(ctx: ClientContext): void {
     signal => remote.describe(signal).then(unwrap)
 
   /**
+   * The composed directory chooser, read without an inject requirement.
+   *
+   * `uiWorkspace` is provided by a plugin this one does not depend on: the chooser is composed by
+   * whichever directory-picker backend the deployment mounts, and a deployment without one must
+   * still get every other control. Reading it here is what lets the Open Workspace button report
+   * "this deployment has no chooser" instead of failing to load.
+   */
+  const pickDirectory: WorktreeHeroInjected['pickDirectory'] = async () => {
+    const chooser = ctx.get('uiWorkspace') as
+      { pickDirectory: () => Promise<string | null> } | undefined
+    if (chooser === undefined) {
+      throw new Error('this deployment composes no directory picker, so a folder cannot be chosen')
+    }
+    return chooser.pickDirectory()
+  }
+
+  /**
    * Bind every git operation to one workspace directory.
    *
    * Bound rather than passed per call because the workspace is the one argument every endpoint
@@ -155,6 +181,43 @@ function surface(ctx: ClientContext): void {
       revealPath: path => ctx.workspaces.openPath(path),
     }),
   }, WorktreeChip))
+
+  /**
+   * The new-session surface, registered at a NEGATIVE priority.
+   *
+   * Shadowing rather than replacing: `ui-workspace` registers the same single seat at the default
+   * priority 0, and the lowest live entry is the one that renders, so this entry takes the seat
+   * without the other package noticing — and uninstalling this plugin hands it straight back. What
+   * the seat RENDERS is the whole point: the core picker's menu ends with an "Add workspace…" row,
+   * and a menu that both switches and creates is what this surface exists to un-confuse.
+   */
+  ctx.slots.inject('conversation.hero.workspace', () => ctx.slots.register({
+    name: 'conversation.hero.workspace',
+    priority: -1,
+    locale: LOCALE_NS,
+    inject: (): WorktreeHeroInjected => ({
+      describeWorktree,
+      commandsFor,
+      pickDirectory,
+      createWorkspace: async (path) => (await ctx.workspaces.create({ path })).workspaceId,
+      renameWorkspace: async (workspaceId, title) => { await ctx.workspaces.rename(workspaceId, title) },
+      suggestBranchName: (prompt) => remote.suggestBranchName({ prompt }).then(unwrap),
+    }),
+  }, HeroWorkspace))
+
+  // Renders nothing; it exists to sit in the session scope and give a new worktree its real name
+  // once the first prompt names the task. See the module doc for why that cannot happen earlier.
+  ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
+    name: 'conversation.session.header.utilities',
+    id: 'worktree-naming',
+    locale: LOCALE_NS,
+    inject: (): WorktreeNamingInjected => ({
+      describeWorktree,
+      commandsFor,
+      renameWorkspace: async (workspaceId, title) => { await ctx.workspaces.rename(workspaceId, title) },
+      suggestBranchName: (prompt) => remote.suggestBranchName({ prompt }).then(unwrap),
+    }),
+  }, WorktreeNaming))
 
   const scope = ctx.settingsScope.bind<WorktreeSettings>({ namespace: SETTINGS_NS })
   ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({

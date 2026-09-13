@@ -8,10 +8,11 @@
  */
 
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import type { WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
   AddWorktreeRequest, AddWorktreeResult, CheckoutRequest, CreateBranchRequest, DeleteBranchRequest,
   LockWorktreeRequest, MutationResult, OverviewResult, RemoveWorktreeRequest, RenameBranchRequest,
-  SuggestPathResult, WorktreeSettings, WorktreeView,
+  SuggestBranchNameResult, SuggestPathResult, WorktreeSettings, WorktreeView,
 } from '../host/types.ts'
 
 /** Every git operation the surface can start, with the workspace path already bound. */
@@ -111,6 +112,92 @@ export interface WorktreeChipInjected {
    * @param path - the directory to reveal.
    */
   revealPath: (path: string) => Promise<void>
+}
+
+/**
+ * Injected business face of the new-session hero surface.
+ *
+ * Wider than the header chip's because this seat is where a session is *placed* rather than where an
+ * existing one is inspected: it adopts directories, chooses them from the Host, renames a Workspace
+ * once its branch has a name, and asks the Host's model to produce that name.
+ */
+export interface WorktreeHeroInjected {
+  /**
+   * Read what this surface is allowed to draw and how often to re-read.
+   * @param signal - abandons the probe when the seat unmounts.
+   * @returns the capability view.
+   */
+  describeWorktree: (signal?: AbortSignal) => Promise<WorktreeView>
+  /**
+   * Bind every git operation to one workspace directory.
+   * @param workspacePath - the workspace's canonical directory.
+   * @returns the bound command set.
+   */
+  commandsFor: (workspacePath: string) => WorktreeCommands
+  /**
+   * Open the Host's own directory chooser.
+   *
+   * Reached through `ctx.uiWorkspace` rather than through the directory-flow slot: this plugin
+   * shadows the hero picker's registration, and a slot occupant may only render child holes its own
+   * registration declared — which is exactly the hole `ui-workspace` still owns. The composed
+   * native/browse chooser is the same interaction either way.
+   * @returns the chosen absolute path, or null when the operator cancelled.
+   */
+  pickDirectory: () => Promise<string | null>
+  /**
+   * Adopt a directory as a harness Workspace.
+   * @param path - the directory to adopt.
+   * @returns the Workspace's id, which is what selecting it needs.
+   */
+  createWorkspace: (path: string) => Promise<WorkspaceId>
+  /**
+   * Rename a Workspace's display title.
+   * @param workspaceId - the Workspace to rename.
+   * @param title - the new title.
+   * @returns settlement after the Host accepts it.
+   */
+  renameWorkspace: (workspaceId: WorkspaceId, title: string) => Promise<void>
+  /**
+   * Ask the Host's model for a branch name describing one prompt.
+   * @param prompt - the prompt to name from.
+   * @returns the suggestion, or a classified failure.
+   */
+  suggestBranchName: (prompt: string) => Promise<SuggestBranchNameResult>
+}
+
+/**
+ * Injected business face of the session header's naming watcher.
+ *
+ * Its own face rather than the chip's because it is a different job on the same repository: the chip
+ * shows and switches, this one renames the branch a new-session worktree was created on.
+ */
+export interface WorktreeNamingInjected {
+  /**
+   * Read the capability view, which carries the branch prefix the name is completed with.
+   * @param signal - abandons the probe when the seat unmounts.
+   * @returns the capability view.
+   */
+  describeWorktree: (signal?: AbortSignal) => Promise<WorktreeView>
+  /**
+   * Bind every git operation to one workspace directory.
+   * @param workspacePath - the workspace's canonical directory.
+   * @returns the bound command set.
+   */
+  commandsFor: (workspacePath: string) => WorktreeCommands
+  /**
+   * Rename a Workspace's display title, so the switcher shows the branch rather than the directory
+   * the provisional name produced.
+   * @param workspaceId - the Workspace to rename.
+   * @param title - the new title.
+   * @returns settlement after the Host accepts it.
+   */
+  renameWorkspace: (workspaceId: WorkspaceId, title: string) => Promise<void>
+  /**
+   * Ask the Host's model for a branch name describing one prompt.
+   * @param prompt - the prompt to name from.
+   * @returns the suggestion, or a classified failure.
+   */
+  suggestBranchName: (prompt: string) => Promise<SuggestBranchNameResult>
 }
 
 /** Injected business face of the worktree settings card. */

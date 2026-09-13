@@ -196,6 +196,19 @@ const _achasoft_dsh_worktree_worktree_renameBranch_result$schema = z.union([z.ob
   'code': z.union([z.literal("no-filesystem"), z.literal("no-subprocess"), z.literal("no-git"), z.literal("not-a-repository"), z.literal("path-denied"), z.literal("not-found"), z.literal("refused"), z.literal("git-failed"), z.literal("timeout"), z.literal("cancelled"), z.literal("invalid-request")]).readonly(),
   'message': z.string().readonly(),
 })])
+const _achasoft_dsh_worktree_worktree_suggestBranchName_parameter_0$schema = z.object({
+  'prompt': z.string().readonly(),
+})
+const _achasoft_dsh_worktree_worktree_suggestBranchName_result$schema = z.union([z.object({
+  'ok': z.literal(true).readonly(),
+  'name': z.string().readonly(),
+  'source': z.union([z.literal("model"), z.literal("fallback")]).readonly(),
+  'model': z.string().readonly().optional(),
+}), z.object({
+  'ok': z.literal(false).readonly(),
+  'code': z.union([z.literal("no-filesystem"), z.literal("no-subprocess"), z.literal("no-git"), z.literal("not-a-repository"), z.literal("path-denied"), z.literal("not-found"), z.literal("refused"), z.literal("git-failed"), z.literal("timeout"), z.literal("cancelled"), z.literal("invalid-request")]).readonly(),
+  'message': z.string().readonly(),
+})])
 const _achasoft_dsh_worktree_worktree_suggestPath_parameter_0$schema = z.object({
   'workspacePath': z.string().readonly(),
   'branch': z.string().readonly(),
@@ -241,7 +254,7 @@ export const TYPERT = {
         typeSymbol: '../src/host/types.ts#AddWorktreeResult',
         schema: _achasoft_dsh_worktree_worktree_addWorktree_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":247,"column":3},
+      sourceLocation: {"file":"src/host/index.ts","line":265,"column":3},
     },
     {
       id: '@achasoft/dsh-worktree#worktree/checkout',
@@ -267,7 +280,7 @@ export const TYPERT = {
         typeSymbol: '../src/host/types.ts#MutationResult',
         schema: _achasoft_dsh_worktree_worktree_checkout_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":192,"column":3},
+      sourceLocation: {"file":"src/host/index.ts","line":193,"column":3},
     },
     {
       id: '@achasoft/dsh-worktree#worktree/createBranch',
@@ -293,7 +306,7 @@ export const TYPERT = {
         typeSymbol: '../src/host/types.ts#MutationResult',
         schema: _achasoft_dsh_worktree_worktree_createBranch_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":203,"column":3},
+      sourceLocation: {"file":"src/host/index.ts","line":204,"column":3},
     },
     {
       id: '@achasoft/dsh-worktree#worktree/deleteBranch',
@@ -319,7 +332,7 @@ export const TYPERT = {
         typeSymbol: '../src/host/types.ts#MutationResult',
         schema: _achasoft_dsh_worktree_worktree_deleteBranch_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":214,"column":3},
+      sourceLocation: {"file":"src/host/index.ts","line":215,"column":3},
     },
     {
       id: '@achasoft/dsh-worktree#worktree/describe',
@@ -336,7 +349,7 @@ export const TYPERT = {
         typeSymbol: '../src/host/types.ts#WorktreeView',
         schema: _achasoft_dsh_worktree_worktree_describe_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":133,"column":3},
+      sourceLocation: {"file":"src/host/index.ts","line":134,"column":3},
     },
     {
       id: '@achasoft/dsh-worktree#worktree/fetch',
@@ -362,7 +375,7 @@ export const TYPERT = {
         typeSymbol: '../src/host/types.ts#MutationResult',
         schema: _achasoft_dsh_worktree_worktree_fetch_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":181,"column":3},
+      sourceLocation: {"file":"src/host/index.ts","line":182,"column":3},
     },
     {
       id: '@achasoft/dsh-worktree#worktree/lockWorktree',
@@ -388,7 +401,7 @@ export const TYPERT = {
         typeSymbol: '../src/host/types.ts#MutationResult',
         schema: _achasoft_dsh_worktree_worktree_lockWorktree_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":269,"column":3},
+      sourceLocation: {"file":"src/host/index.ts","line":287,"column":3},
     },
     {
       id: '@achasoft/dsh-worktree#worktree/overview',
@@ -414,7 +427,7 @@ export const TYPERT = {
         typeSymbol: '../src/host/types.ts#OverviewResult',
         schema: _achasoft_dsh_worktree_worktree_overview_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":170,"column":3},
+      sourceLocation: {"file":"src/host/index.ts","line":171,"column":3},
     },
     {
       id: '@achasoft/dsh-worktree#worktree/pruneWorktrees',
@@ -440,7 +453,7 @@ export const TYPERT = {
         typeSymbol: '../src/host/types.ts#MutationResult',
         schema: _achasoft_dsh_worktree_worktree_pruneWorktrees_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":280,"column":3},
+      sourceLocation: {"file":"src/host/index.ts","line":298,"column":3},
     },
     {
       id: '@achasoft/dsh-worktree#worktree/removeWorktree',
@@ -466,7 +479,7 @@ export const TYPERT = {
         typeSymbol: '../src/host/types.ts#MutationResult',
         schema: _achasoft_dsh_worktree_worktree_removeWorktree_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":258,"column":3},
+      sourceLocation: {"file":"src/host/index.ts","line":276,"column":3},
     },
     {
       id: '@achasoft/dsh-worktree#worktree/renameBranch',
@@ -492,7 +505,33 @@ export const TYPERT = {
         typeSymbol: '../src/host/types.ts#MutationResult',
         schema: _achasoft_dsh_worktree_worktree_renameBranch_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":225,"column":3},
+      sourceLocation: {"file":"src/host/index.ts","line":226,"column":3},
+    },
+    {
+      id: '@achasoft/dsh-worktree#worktree/suggestBranchName',
+      service: 'worktree',
+      namespace: 'worktree',
+      method: 'suggestBranchName',
+      invocation: { kind: 'direct' },
+      parameters: [
+        {
+          name: 'request',
+          wire: 'request',
+          source: 'json',
+          codec: {
+            mode: 'strict',
+            typeSymbol: '../src/host/types.ts#SuggestBranchNameRequest',
+            schema: _achasoft_dsh_worktree_worktree_suggestBranchName_parameter_0$schema,
+          },
+        },
+      ],
+      cancellation: { parameter: 'signal' },
+      result: {
+        mode: 'strict',
+        typeSymbol: '../src/host/types.ts#SuggestBranchNameResult',
+        schema: _achasoft_dsh_worktree_worktree_suggestBranchName_result$schema,
+      },
+      sourceLocation: {"file":"src/host/index.ts","line":241,"column":3},
     },
     {
       id: '@achasoft/dsh-worktree#worktree/suggestPath',
@@ -518,7 +557,7 @@ export const TYPERT = {
         typeSymbol: '../src/host/types.ts#SuggestPathResult',
         schema: _achasoft_dsh_worktree_worktree_suggestPath_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":236,"column":3},
+      sourceLocation: {"file":"src/host/index.ts","line":254,"column":3},
     },
   ],
   model: {

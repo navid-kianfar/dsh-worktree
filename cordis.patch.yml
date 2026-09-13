@@ -15,6 +15,10 @@
     - id: worktree
       name: '@achasoft/dsh-worktree/host'
       config:
+        # Draw the worktree surface at all: the session-header chip, and the "Worktree" checkbox on
+        # the new-session screen. Off leaves every endpoint callable and the settings card intact —
+        # the project switcher and Open Workspace on that screen stay, because they are the seat
+        # this plugin shadows rather than a worktree control of its own.
         showChip: true
 
         # Where `worktree add` puts a directory when the browser sends no path.

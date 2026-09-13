@@ -3,7 +3,7 @@ import type {
   RemoteResult,
   TypertRemoteContribution,
 } from '@deepseek-ai/dsh-typert-protocol'
-import type { AddWorktreeRequest, AddWorktreeResult, CheckoutRequest, CreateBranchRequest, DeleteBranchRequest, LockWorktreeRequest, MutationResult, OverviewResult, RemoveWorktreeRequest, RenameBranchRequest, RepoRequest, SuggestPathRequest, SuggestPathResult, WorktreeView } from '../src/host/types.ts'
+import type { AddWorktreeRequest, AddWorktreeResult, CheckoutRequest, CreateBranchRequest, DeleteBranchRequest, LockWorktreeRequest, MutationResult, OverviewResult, RemoveWorktreeRequest, RenameBranchRequest, RepoRequest, SuggestBranchNameRequest, SuggestBranchNameResult, SuggestPathRequest, SuggestPathResult, WorktreeView } from '../src/host/types.ts'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$776f726b74726565 {
@@ -18,6 +18,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     pruneWorktrees: (request: RepoRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
     removeWorktree: (request: RemoveWorktreeRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
     renameBranch: (request: RenameBranchRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
+    suggestBranchName: (request: SuggestBranchNameRequest, signal?: AbortSignal) => Promise<RemoteResult<SuggestBranchNameResult>>
     suggestPath: (request: SuggestPathRequest, signal?: AbortSignal) => Promise<RemoteResult<SuggestPathResult>>
   }
   interface TypertRemoteMap {
@@ -32,6 +33,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'worktree/pruneWorktrees': (request: RepoRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
     'worktree/removeWorktree': (request: RemoveWorktreeRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
     'worktree/renameBranch': (request: RenameBranchRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
+    'worktree/suggestBranchName': (request: SuggestBranchNameRequest, signal?: AbortSignal) => Promise<RemoteResult<SuggestBranchNameResult>>
     'worktree/suggestPath': (request: SuggestPathRequest, signal?: AbortSignal) => Promise<RemoteResult<SuggestPathResult>>
   }
   interface TypertRemoteNamespaceMap {

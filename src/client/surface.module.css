@@ -760,3 +760,103 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
 }
+
+/* --- new-session row ---
+ *
+ * These three live inside the shell's hero workspace row, beside the folder chip it draws itself.
+ * They are sized like that chip (28px tall, 12px labels) so the row reads as one control cluster
+ * rather than an app's chrome next to the harness's. */
+
+.heroOpen {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px dashed var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.heroOpen:hover:not(:disabled) {
+  border-color: var(--dsw-alias-border-l4);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.heroOpen:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
+}
+
+.heroOpen:disabled {
+  cursor: default;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.heroIcon {
+  flex: none;
+  display: inline-flex;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.heroText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.heroCheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.heroCheck:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+/* The native box is kept rather than redrawn: it is the control keyboard and screen-reader users
+   already know, and only its accent is themed. */
+.heroCheckBox {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--dsw-alias-brand-primary);
+  cursor: pointer;
+}
+
+.heroCheckBox:disabled {
+  cursor: default;
+}
+
+/* Full-width, because a failure here is about the whole row rather than any one control in it. */
+.heroError {
+  display: flex;
+  flex-direction: column;
+  flex-basis: 100%;
+  gap: 4px;
+}
+
+.heroErrorText {
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}

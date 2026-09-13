@@ -324,6 +324,32 @@ export interface AddWorktreeSuccess {
 /** One worktree creation's outcome. */
 export type AddWorktreeResult = AddWorktreeSuccess | GitFailure
 
+/**
+ * Ask the deployment's model for a branch name that describes one prompt.
+ *
+ * Deliberately not a {@link RepoRequest}: naming is pure text work, and requiring a repository would
+ * make the one caller — the new-session surface, which asks before any session exists — prove a
+ * repository it has already proved to draw its own control.
+ */
+export interface SuggestBranchNameRequest {
+  /** The human's prompt (or the composer draft) to name from. */
+  readonly prompt: string
+}
+
+/** A git-legal short name for one prompt. */
+export interface SuggestBranchNameSuccess {
+  readonly ok: true
+  /** The suggested name, before any configured `branchPrefix` is applied. */
+  readonly name: string
+  /** Who produced it: the deployment's model, or the deterministic prompt slug. */
+  readonly source: 'model' | 'fallback'
+  /** `provider/model` that answered, present exactly when {@link source} is `model`. */
+  readonly model?: string
+}
+
+/** One naming suggestion, or the reason there is none. */
+export type SuggestBranchNameResult = SuggestBranchNameSuccess | GitFailure
+
 /** Remove a worktree. */
 export interface RemoveWorktreeRequest extends RepoRequest {
   /** Absolute path of the worktree to remove. */
