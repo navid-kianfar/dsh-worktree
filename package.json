@@ -1,6 +1,6 @@
 {
   "name": "@achasoft/dsh-worktree",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Git worktrees and branches for the DeepSeek Harness Web Client: a session-header chip that shows where the session is checked out, branch and worktree switching, and worktrees adopted as harness workspaces",
   "license": "MIT",
   "type": "module",

@@ -49,9 +49,22 @@ type Dialog =
  * @returns the chip, or null when there is nothing true to draw.
  */
 export function WorktreeChip(props: WorktreeChipProps) {
-  const { sessionId, useWorkspaces, describeWorktree, commandsFor, adoptWorkspace, revealPath, t } = props
+  const {
+    sessionId, useWorkspaces, describeWorktree, commandsFor, adoptWorkspace, canRevealPath, revealPath, t,
+  } = props
   const [panel, setPanel] = useState<OpenPanel>(null)
   const [dialog, setDialog] = useState<Dialog>(null)
+  // Unknown reads as unsupported: the action appears once the Host says yes, never as a dead item.
+  const [revealable, setRevealable] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    canRevealPath().then(
+      (supported) => { if (live) setRevealable(supported) },
+      () => { if (live) setRevealable(false) },
+    )
+    return () => { live = false }
+  }, [canRevealPath])
   const rootRef = useRef<HTMLSpanElement | null>(null)
 
   const workspacePath = useWorkspaces(
@@ -213,12 +226,16 @@ export function WorktreeChip(props: WorktreeChipProps) {
             state={state}
             t={t}
             onOpen={openWorktree}
-            onReveal={(path) => {
-              void revealPath(path).catch(() => {
-                // Revealing is a convenience the Host may not support; failing it silently keeps a
-                // popover from turning into an error surface for something nothing depends on.
-              })
-            }}
+            {...revealable
+              ? {
+                  onReveal: (path: string) => {
+                    void revealPath(path).catch(() => {
+                      // Revealing is a convenience; failing it silently keeps a popover from turning
+                      // into an error surface for something nothing depends on.
+                    })
+                  },
+                }
+              : {}}
             onLock={(path, locked) => { void run(() => commands.lockWorktree({ path, locked })) }}
             onRemove={(entry) => { openDialog({ kind: 'remove-worktree', entry }) }}
             onPrune={() => { void run(() => commands.pruneWorktrees()) }}

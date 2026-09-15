@@ -29,8 +29,9 @@ import worktreeRemote from '../../generated/typert.remote-client.js'
 import type { WorktreeSettings } from '../host/types.ts'
 import type {
   WorktreeChipInjected, WorktreeCommands, WorktreeHeroInjected, WorktreeNamingInjected,
-  WorktreeSettingsInjected,
+  WorktreeSendGateInjected, WorktreeSettingsInjected,
 } from './contract.ts'
+import { WorktreeSendGate } from './SendGate.tsx'
 import { WorktreeChip } from './WorktreeChip.tsx'
 import { HeroWorkspace } from './HeroWorkspace.tsx'
 import { WorktreeNaming } from './WorktreeNaming.tsx'
@@ -39,11 +40,13 @@ import { en, zh, type WorktreeKey } from './locales.ts'
 
 export type {
   WorktreeChipInjected, WorktreeCommands, WorktreeHeroInjected, WorktreeNamingInjected,
-  WorktreeSettingsInjected,
+  WorktreeSendGateInjected, WorktreeSettingsInjected,
 } from './contract.ts'
 export type { WorktreeKey } from './locales.ts'
 export type { WorktreeChipProps } from './WorktreeChip.tsx'
 export type { HeroWorkspaceProps } from './HeroWorkspace.tsx'
+export type { WorktreeSendGateProps } from './SendGate.tsx'
+export type { StagedSession } from './staging.ts'
 export type { WorktreeNamingProps } from './WorktreeNaming.tsx'
 export type { WorktreeSettingsCardProps } from './WorktreeSettingsCard.tsx'
 export type { WorktreeState } from './useWorktree.ts'
@@ -120,7 +123,7 @@ function surface(ctx: ClientContext): void {
    *
    * `uiWorkspace` is provided by a plugin this one does not depend on: the chooser is composed by
    * whichever directory-picker backend the deployment mounts, and a deployment without one must
-   * still get every other control. Reading it here is what lets the Open Workspace button report
+   * still get every other control. Reading it here is what lets "Browse for folder…" report
    * "this deployment has no chooser" instead of failing to load.
    */
   const pickDirectory: WorktreeHeroInjected['pickDirectory'] = async () => {
@@ -166,7 +169,49 @@ function surface(ctx: ClientContext): void {
    */
   const adoptWorkspace: WorktreeChipInjected['adoptWorkspace'] = async (path, openSession) => {
     const workspace = await ctx.workspaces.create({ path })
-    if (openSession) ctx.workspaces.startSession(workspace.workspaceId)
+    if (!openSession) return
+    // Navigation is not the Workspace Controller's: `workspaces` owns the list and its commands, and
+    // "start a session there" is `ui-workspace`'s. Its `startSession(workspaceId)` reuses the
+    // Workspace's blank session or creates one, and finds the new entry because `create` has already
+    // merged it into the list snapshot. Read without an inject requirement, like `pickDirectory`.
+    const navigation = ctx.get('uiWorkspace') as
+      { startSession: (workspaceId?: string) => void } | undefined
+    if (navigation === undefined) {
+      throw new Error('this deployment composes no workspace navigation, so a session cannot be opened')
+    }
+    navigation.startSession(workspace.workspaceId)
+  }
+
+  /**
+   * The Session Remote's native-desktop handoff, read without an inject requirement.
+   *
+   * `session.openWorkspacePath` with `action: 'reveal'` is the Host's file-manager handoff (Finder
+   * `open -R`, Explorer `/select,`, or the parent directory on Linux); `canOpenWorkspacePath` is its
+   * availability probe, false on a Host with no desktop. Nothing else in the client can show a Host
+   * path: the Workspace Controller has no such command, and open-in-app launches applications.
+   */
+  const sessionRemote = (): {
+    canOpenWorkspacePath: () => Promise<RemoteResult<boolean>>
+    openWorkspacePath: (request: { action?: 'reveal'; path: string }) => Promise<RemoteResult<{ opened: true }>>
+  } | undefined => ctx.get('remote.session') as ReturnType<typeof sessionRemote>
+  let revealProbe: Promise<boolean> | undefined
+  const canRevealPath: WorktreeChipInjected['canRevealPath'] = () => {
+    const session = sessionRemote()
+    if (session === undefined) return Promise.resolve(false)
+    // The answer is the Host's platform and config, fixed for the page; a transport failure is not
+    // an answer, so it is not kept.
+    revealProbe ??= session.canOpenWorkspacePath().then(unwrap).catch((reason: unknown) => {
+      revealProbe = undefined
+      throw reason
+    })
+    return revealProbe
+  }
+  const revealPath: WorktreeChipInjected['revealPath'] = async (path) => {
+    const session = sessionRemote()
+    if (session === undefined) {
+      throw new Error('this deployment composes no session remote, so a path cannot be revealed')
+    }
+    unwrap(await session.openWorkspacePath({ action: 'reveal', path }))
   }
 
   ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
@@ -178,7 +223,8 @@ function surface(ctx: ClientContext): void {
       describeWorktree,
       commandsFor,
       adoptWorkspace,
-      revealPath: path => ctx.workspaces.openPath(path),
+      canRevealPath,
+      revealPath,
     }),
   }, WorktreeChip))
 
@@ -200,10 +246,55 @@ function surface(ctx: ClientContext): void {
       commandsFor,
       pickDirectory,
       createWorkspace: async (path) => (await ctx.workspaces.create({ path })).workspaceId,
-      renameWorkspace: async (workspaceId, title) => { await ctx.workspaces.rename(workspaceId, title) },
-      suggestBranchName: (prompt) => remote.suggestBranchName({ prompt }).then(unwrap),
     }),
   }, HeroWorkspace))
+
+  /** A session's scope, for the harness facilities that are resolved per session. */
+  const scopeOf = (sessionId: string): unknown =>
+    (ctx.get('sessions') as { scope: (id: string) => unknown } | undefined)?.scope(sessionId)
+
+  // Sits in the composer card so it can own the first send of a staged worktree. See SendGate.tsx.
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
+    name: 'conversation.input.left',
+    id: 'worktree-send-gate',
+    locale: LOCALE_NS,
+    inject: (): WorktreeSendGateInjected => ({
+      describeWorktree,
+      commandsFor,
+      createWorkspace: async (path) => (await ctx.workspaces.create({ path })).workspaceId,
+      renameWorkspace: async (workspaceId, title) => { await ctx.workspaces.rename(workspaceId, title) },
+      suggestBranchName: (prompt) => remote.suggestBranchName({ prompt }).then(unwrap),
+      // Read through `ctx.get` and typed locally: these services belong to packages this plugin does
+      // not depend on, and a deployment without them must still load every other seat.
+      deleteWorkspace: async (workspaceId) => { await ctx.workspaces.delete(workspaceId) },
+      // Mirrors the harness keymap: an open menu takes Enter only while one of its rows is highlighted;
+      // with nothing highlighted (e.g. suggestions still loading) Enter sends.
+      menuClaimsEnter: (sessionId) => {
+        const triggers = ctx.get('inputTriggers') as
+          | { sessionOf: (scope: unknown) => { menu: { getSnapshot: () => { open: boolean, highlight: unknown } } } }
+          | undefined
+        const scope = scopeOf(sessionId)
+        if (triggers === undefined || scope === undefined) return false
+        const menu = triggers.sessionOf(scope).menu.getSnapshot()
+        return menu.open && menu.highlight !== null
+      },
+      currentSession: () =>
+        (ctx.get('sessions') as { list: { getSnapshot: () => { current?: string } } } | undefined)
+          ?.list.getSnapshot().current,
+      block: (sessionId, reason) => {
+        const conversation = ctx.get('conversation') as
+          { blocks: { set: (id: string, block: { reason: string } | undefined) => void } } | undefined
+        conversation?.blocks.set(sessionId, reason === undefined ? undefined : { reason })
+      },
+      notify: (sessionId, text) => {
+        const conversation = ctx.get('conversation') as
+          { input: { for: (scope: unknown) => { notify: (level: 'error', text: string) => void } } } | undefined
+        const scope = scopeOf(sessionId)
+        if (conversation === undefined || scope === undefined) return
+        conversation.input.for(scope).notify('error', text)
+      },
+    }),
+  }, WorktreeSendGate))
 
   // Renders nothing; it exists to sit in the session scope and give a new worktree its real name
   // once the first prompt names the task. See the module doc for why that cannot happen earlier.

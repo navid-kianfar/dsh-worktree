@@ -108,8 +108,17 @@ export interface WorktreeChipInjected {
    */
   adoptWorkspace: (path: string, openSession: boolean) => Promise<void>
   /**
-   * Open a path with the Host operating system's default application.
+   * Whether the Host can show a path in its file manager.
+   *
+   * False on a Host with no desktop (or a deployment without the Session Remote); the chip leaves the
+   * reveal action out rather than offering one that cannot work.
+   * @returns the Host's answer; rejects on a transport failure.
+   */
+  canRevealPath: () => Promise<boolean>
+  /**
+   * Show a directory in the Host's file manager.
    * @param path - the directory to reveal.
+   * @returns after the Host's opener accepted the path; rejects when it cannot.
    */
   revealPath: (path: string) => Promise<void>
 }
@@ -117,9 +126,9 @@ export interface WorktreeChipInjected {
 /**
  * Injected business face of the new-session hero surface.
  *
- * Wider than the header chip's because this seat is where a session is *placed* rather than where an
- * existing one is inspected: it adopts directories, chooses them from the Host, renames a Workspace
- * once its branch has a name, and asks the Host's model to produce that name.
+ * Its own face because this seat is where a session is *placed* rather than where an existing one is
+ * inspected: it chooses directories from the Host and adopts them as Workspaces. Creating the
+ * worktree on first send belongs to the composer's gate (see {@link WorktreeSendGateInjected}).
  */
 export interface WorktreeHeroInjected {
   /**
@@ -150,19 +159,53 @@ export interface WorktreeHeroInjected {
    * @returns the Workspace's id, which is what selecting it needs.
    */
   createWorkspace: (path: string) => Promise<WorkspaceId>
+}
+
+/**
+ * Injected business face of the composer's first-send gate.
+ *
+ * Besides git, it needs harness facilities that no standard kit hands a slot: whether a trigger
+ * menu would take Enter, which session is on screen (the move must only ever carry this session's
+ * draft), the composer block that stops input while the worktree is made, the composer's notice line
+ * for a failure, and removing a Workspace again when an attempt is rolled back.
+ */
+export interface WorktreeSendGateInjected extends WorktreeNamingInjected {
   /**
-   * Rename a Workspace's display title.
-   * @param workspaceId - the Workspace to rename.
-   * @param title - the new title.
+   * Adopt a directory as a Workspace.
+   * @param path - absolute directory.
+   * @returns the Workspace's id (an existing one when the directory was adopted before).
+   */
+  createWorkspace: (path: string) => Promise<WorkspaceId>
+  /**
+   * Remove a Workspace from the registry, for undoing one this gate adopted.
+   * @param workspaceId - the Workspace.
    * @returns settlement after the Host accepts it.
    */
-  renameWorkspace: (workspaceId: WorkspaceId, title: string) => Promise<void>
+  deleteWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   /**
-   * Ask the Host's model for a branch name describing one prompt.
-   * @param prompt - the prompt to name from.
-   * @returns the suggestion, or a classified failure.
+   * Whether this session's `/` or `@` menu would take Enter: open with a highlighted row, which is
+   * exactly when the harness keymap picks from the menu instead of sending.
+   * @param sessionId - the session.
+   * @returns true when Enter belongs to the menu.
    */
-  suggestBranchName: (prompt: string) => Promise<SuggestBranchNameResult>
+  menuClaimsEnter: (sessionId: string) => boolean
+  /**
+   * The session currently on screen.
+   * @returns its id, or undefined when none is selected.
+   */
+  currentSession: () => string | undefined
+  /**
+   * Raise or clear this session's composer block.
+   * @param sessionId - the session.
+   * @param reason - the placeholder to show, or undefined to clear the block.
+   */
+  block: (sessionId: string, reason: string | undefined) => void
+  /**
+   * Show an error in the session's composer notice line.
+   * @param sessionId - the session.
+   * @param text - the message.
+   */
+  notify: (sessionId: string, text: string) => void
 }
 
 /**

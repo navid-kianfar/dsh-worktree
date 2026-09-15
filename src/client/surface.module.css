@@ -763,72 +763,85 @@
 
 /* --- new-session row ---
  *
- * These three live inside the shell's hero workspace row, beside the folder chip it draws itself.
- * They are sized like that chip (28px tall, 12px labels) so the row reads as one control cluster
- * rather than an app's chrome next to the harness's. */
+ * These sit inside the shell's hero workspace row, beside the folder chip it draws itself and the
+ * mode chip it renders after this seat. They take the chips' measurements (28px tall, 13px labels,
+ * 16px radius) so the row reads as one control cluster rather than an app's chrome beside the
+ * harness's. */
 
-.heroOpen {
+/* The row is a flex container and every slot wrapper is `display: contents`, so `order` is what
+   puts this pill after the mode chip the shell renders after this seat. */
+.heroPill {
+  order: 2;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   flex: none;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px dashed var(--dsw-alias-border-l2);
-  border-radius: 999px;
+  min-height: 28px;
+  margin-left: 4px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 16px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.heroPillBranch,
+.heroPillCheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: none;
   background: transparent;
-  color: var(--dsw-alias-label-secondary);
+  color: inherit;
   font: inherit;
-  font-size: 12px;
   white-space: nowrap;
   cursor: pointer;
 }
 
-.heroOpen:hover:not(:disabled) {
-  border-color: var(--dsw-alias-border-l4);
+.heroPillBranch {
+  max-width: 220px;
+  border-radius: 16px 0 0 16px;
+}
+
+.heroPillCheck {
+  gap: 6px;
+  border-radius: 0 16px 16px 0;
+}
+
+.heroPillBranch:not(:disabled):hover,
+.heroPillBranch[aria-expanded='true'],
+.heroPillCheck:hover {
   background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
 }
 
-.heroOpen:focus-visible {
+.heroPillBranch:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary);
-  outline-offset: -1px;
+  outline-offset: -2px;
 }
 
-.heroOpen:disabled {
+.heroPillBranch:disabled {
   cursor: default;
   color: var(--dsw-alias-label-tertiary);
+}
+
+.heroPillDivider {
+  flex: none;
+  width: 1px;
+  height: 14px;
+  background: var(--dsw-alias-border-l2);
 }
 
 .heroIcon {
   flex: none;
   display: inline-flex;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .heroText {
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.heroCheck {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 999px;
-  background: var(--dsw-alias-bg-layer-3);
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.heroCheck:hover {
-  color: var(--dsw-alias-label-primary);
 }
 
 /* The native box is kept rather than redrawn: it is the control keyboard and screen-reader users
@@ -842,21 +855,146 @@
   cursor: pointer;
 }
 
-.heroCheckBox:disabled {
-  cursor: default;
+.heroError {
+  order: 3;
+  min-width: 0;
+  margin-left: 8px;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Full-width, because a failure here is about the whole row rather than any one control in it. */
-.heroError {
+/* --- searchable picker (project switcher, branch picker) --- */
+
+.picker {
+  position: fixed;
+  z-index: 1000;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  flex-basis: 100%;
-  gap: 4px;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  max-height: min(420px, calc(100vh - 24px));
+  border: 1px solid var(--dsw-alias-border-inverted);
+  border-radius: 12px;
+  background: var(--dsw-specific-menu);
+  box-shadow: var(--dsw-shadow-lv3);
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  overflow: hidden;
 }
 
-.heroErrorText {
+.pickerSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+
+.pickerSearchIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.pickerSearchInput {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+}
+
+.pickerSearchInput::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.pickerError {
+  margin: 8px 12px 0;
   color: var(--dsw-alias-state-error-primary);
   font-size: 12px;
   line-height: 18px;
   overflow-wrap: anywhere;
+}
+
+.pickerList {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  overflow-y: auto;
+  scrollbar-color: var(--dsw-alias-scrollbar-bg-l1) transparent;
+}
+
+.pickerRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pickerRow[data-active] {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.pickerRow:disabled {
+  cursor: default;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.pickerIcon {
+  flex: none;
+  display: inline-flex;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.pickerLabel {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pickerDetail {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pickerCheck {
+  flex: none;
+  margin-left: auto;
+  color: var(--dsw-alias-brand-primary);
+}
+
+.pickerEmpty {
+  padding: 8px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+}
+
+.pickerFooter {
+  padding: 6px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
 }

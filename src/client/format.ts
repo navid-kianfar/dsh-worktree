@@ -126,3 +126,21 @@ export function describeFailure(code: GitFailureCode): string {
     case 'invalid-request': return 'that value is not usable'
   }
 }
+
+/**
+ * How well a row matches the filter.
+ *
+ * The label is matched fuzzily, the detail only as a plain substring: a long path contains nearly
+ * every letter, so a fuzzy match against it would keep almost every project in the list.
+ * @param row - the row.
+ * @param needle - the trimmed filter text.
+ * @param lower - the same text, lower-cased.
+ * @returns a score where higher is better, or -1 when the row does not match.
+ */
+export function matchScore(
+  row: { readonly label: string, readonly detail?: string }, needle: string, lower: string,
+): number {
+  const label = fuzzyScore(row.label, needle)
+  if (label >= 0) return label + 1000
+  return row.detail !== undefined && row.detail.toLowerCase().includes(lower) ? 1 : -1
+}

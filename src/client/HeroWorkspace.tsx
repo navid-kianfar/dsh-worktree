@@ -1,40 +1,41 @@
 /**
- * The new-session workspace switcher: which project this session starts in, plus the two controls
- * that decide how it starts there.
+ * The new-session toolbar, shaped like Claude Code's: the project switcher, the mode chip, and one
+ * pill holding the branch and the worktree checkbox — in that order.
  *
- * This seat shadows `ui-workspace`'s own picker (registered one priority lower) rather than
- * replacing the core chrome, because the chrome is not a slot: the shell draws the folder chip and
- * hands every occupant the same owner share. Shadowing is the documented way to change what the
- * chip's cluster contains without forking the shell, and the chip itself keeps working — it is the
- * owner's toggle, and this component renders what opening it means.
+ * This seat shadows `ui-workspace`'s own picker (registered one priority lower). The shell draws the
+ * folder chip itself and hands its toggle to whichever entry holds the seat, so the chip stays core
+ * chrome and this component renders what opening it means: a searchable project list with "Browse
+ * for folder…" underneath. The mode chip (`conversation.hero.agentPreset`) is rendered by the shell
+ * right after this seat, and every slot's wrapper is `display: contents`, so the pill carries a CSS
+ * `order` that places it after the mode chip instead of before it.
  *
- * Three departures from the core picker, all of them the reason this exists:
+ * The pill mirrors Claude Code:
  *
- * - **No "Add workspace…" row.** A menu whose job is choosing between projects must not also be the
- *   only way to create one; a row that leaves the menu for a dialog reads as a third choice rather
- *   than an action, which is precisely the confusion this replaces. Adopting a directory is its own
- *   labelled button, so the menu is only ever a switcher.
- * - **`Open Workspace` as a button.** It calls the Host's own chooser and starts a session in what
- *   it returns — the one action that was previously buried as the last row of the menu.
- * - **A worktree checkbox.** Ticking it puts the session in a fresh git worktree instead of the
- *   repository: the worktree is created immediately (a session can only be pointed at a directory
- *   that exists) on a provisional branch, and the session-header seat renames that branch from the
- *   first prompt, because nobody can name a task before they have described it.
+ * - **Worktree unticked** — the session runs in the project folder, so the branch control switches
+ *   that folder's branch. git refuses the switch when uncommitted changes would be lost, and the
+ *   refusal is shown in the dropdown.
+ * - **Worktree ticked** — nothing is created yet. The branch control picks the branch the new worktree
+ *   will start from, and the composer's send gate creates the worktree when the first prompt is sent,
+ *   named from that prompt. Unticking before then leaves nothing behind.
+ *
+ * A project that is not a git repository gets no pill at all rather than an error box: there is no
+ * branch to show and nothing to do about it.
  * @module @achasoft/dsh-worktree/client/HeroWorkspace
  */
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
-import { IconFolderClose16, IconFolderOpen16, Menu, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  IconBranchOutline16, IconChevronDownOutline14, IconFolderClose16, IconFolderOpenOutline16, Tooltip,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls the ui-conversation SlotMap merge (the hero workspace seat) and the standard kit
 // (`useWorkspaces`) the framework hands every root-scope entry.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { applyBranchPrefix } from '../shared/branch-name.ts'
 import type { WorktreeHeroInjected } from './contract.ts'
-import { FailureStrip } from './FailureStrip.tsx'
-import { worktreeIntents, type WorktreeIntent } from './intents.ts'
+import { branchLabel, elideMiddle } from './format.ts'
+import { PickerPopover, type PickerRow } from './PickerPopover.tsx'
+import { heroPicker, stagedSessions } from './staging.ts'
 import { useWorktree } from './useWorktree.ts'
 import css from './surface.module.css'
 
@@ -45,26 +46,9 @@ export type HeroWorkspaceProps =
   & PropsLocale<'worktree'>
 
 /**
- * A provisional branch name that cannot collide with a typed one.
- *
- * Prefixed with `wt-` and suffixed with random hex rather than derived from anything, because it is
- * thrown away: the branch is renamed from the prompt as soon as there is one, and this name only has
- * to be unique for the seconds between creating the worktree and naming it.
- * @returns an unremarkable branch-name component.
- */
-function provisionalBranch(): string {
-  // `crypto.randomUUID` needs a secure context, which a harness reached over a LAN address is not;
-  // a weak suffix is fine here because it only has to be unique among one repository's worktrees.
-  const suffix = globalThis.crypto?.randomUUID === undefined
-    ? Math.random().toString(16).slice(2, 10).padEnd(8, '0')
-    : globalThis.crypto.randomUUID().replace(/-/gu, '').slice(0, 8)
-  return `wt-${suffix}`
-}
-
-/**
- * Render the workspace switcher, the open-workspace button, and the worktree checkbox.
+ * Render the project switcher's dropdown and the branch + worktree pill.
  * @param props - the owner's toggle state and pick callback, the injected actions, and the locale seat.
- * @returns the menu and the two controls beside the chip.
+ * @returns the project dropdown, the pill, and any browse failure.
  */
 export function HeroWorkspace(props: HeroWorkspaceProps) {
   const {
@@ -72,154 +56,189 @@ export function HeroWorkspace(props: HeroWorkspaceProps) {
     describeWorktree, commandsFor, pickDirectory, createWorkspace,
   } = props
   const workspaces = useWorkspaces(state => state.items)
-  const selectedPath = workspaces.find(workspace => workspace.workspaceId === selectedId)?.path
+  const selected = workspaces.find(workspace => workspace.workspaceId === selectedId)
+  const selectedPath = selected?.path
   const commands = useMemo(
     () => (selectedPath === undefined ? null : commandsFor(selectedPath)),
     [commandsFor, selectedPath],
   )
   const state = useWorktree(describeWorktree, commands)
-  const { view, overview, busy, run, failure } = state
-  const intents = useSyncExternalStore(worktreeIntents.subscribe, worktreeIntents.getSnapshot)
-  const intent = intents.find(entry => entry.workspaceId === selectedId)
-  const [openFailure, setOpenFailure] = useState<string | undefined>(undefined)
-  const [picking, setPicking] = useState(false)
-
-  const getAnchorRect = useCallback(
-    () => anchorRef?.current?.getBoundingClientRect() ?? null,
-    [anchorRef],
-  )
+  const { view, overview, busy, run, failure, clearFailure } = state
+  const staging = useSyncExternalStore(stagedSessions.subscribe, stagedSessions.getSnapshot)
+  const staged = selectedId === undefined ? undefined : staging.get(selectedId)
+  const [browseFailure, setBrowseFailure] = useState<string | undefined>(undefined)
+  const [browsing, setBrowsing] = useState(false)
+  const [branchesOpen, setBranchesOpen] = useState(false)
+  const branchAnchor = useRef<HTMLButtonElement>(null)
+  // A stable stand-in for an owner that supplied no anchor: a fresh object per render would re-run
+  // the popover's placement effect on every render, and placement itself re-renders.
+  const noAnchor = useRef<HTMLElement>(null)
 
   /** Hand a workspace to the owner, which is what carries the draft and opens its blank session. */
   const pick = useCallback((workspaceId: WorkspaceId): void => { onPick(workspaceId) }, [onPick])
 
-  const openWorkspace = useCallback((): void => {
+  // The composer's send gate moves to the worktree through this same pick, so the draft is carried
+  // exactly as a manual project switch carries it.
+  useEffect(() => {
+    heroPicker.set(pick)
+    return () => { heroPicker.set(undefined) }
+  }, [pick])
+
+  const browse = useCallback((): void => {
     onClose()
-    setOpenFailure(undefined)
-    setPicking(true)
+    setBrowseFailure(undefined)
+    setBrowsing(true)
     void pickDirectory().then((path) => {
       if (path === null) return undefined
       return createWorkspace(path).then((workspaceId) => { pick(workspaceId) })
     }).catch((reason: unknown) => {
-      setOpenFailure(reason instanceof Error ? reason.message : String(reason))
-    }).finally(() => { setPicking(false) })
+      setBrowseFailure(reason instanceof Error ? reason.message : String(reason))
+    }).finally(() => { setBrowsing(false) })
   }, [onClose, pickDirectory, createWorkspace, pick])
 
-  // A menu is for choosing between targets. With none to choose between, the chip's gesture IS the
-  // open action — the same rule the core picker applies, kept because the chip is still core chrome
-  // and someone clicking it must not get an empty popover.
+  // With no project to choose between, opening the switcher IS browsing — an empty dropdown with one
+  // action row would only be an extra click.
   useEffect(() => {
-    if (open && workspaces.length === 0 && !picking) openWorkspace()
-  }, [open, workspaces.length, picking, openWorkspace])
+    if (open && workspaces.length === 0 && !browsing) browse()
+  }, [open, workspaces.length, browsing, browse])
 
-  const check = useCallback((): void => {
-    if (selectedId === undefined || commands === null || view === null) return
-    setOpenFailure(undefined)
-    const branch = applyBranchPrefix(view.branchPrefix, provisionalBranch())
-    void run(() => commands.addWorktree({ branch, createBranch: true, detach: false })).then((created) => {
-      if (created === null) return undefined
-      return createWorkspace(created.path).then((workspaceId) => {
-        worktreeIntents.set({
-          workspaceId,
-          baseWorkspaceId: selectedId,
-          path: created.path,
-          branch: created.branch ?? branch,
-          named: false,
-        })
-        pick(workspaceId)
-      }).catch((reason: unknown) => {
-        // The worktree exists but nothing can reach it, and leaving it behind would be a directory
-        // nobody asked for: remove it, and let the git failure surface if even that fails.
-        void run(() => commands.removeWorktree({ path: created.path, force: false }))
-        throw reason
-      })
-    }).catch((reason: unknown) => {
-      setOpenFailure(reason instanceof Error ? reason.message : String(reason))
-    })
-  }, [selectedId, commands, view, run, createWorkspace, pick])
-
-  const uncheck = useCallback((entry: WorktreeIntent): void => {
-    if (commands === null) return
-    setOpenFailure(undefined)
-    void run(() => commands.removeWorktree({ path: entry.path, force: false })).then((removed) => {
-      if (removed === null) return undefined
-      // The branch is this surface's own provisional name — nobody had it before the checkbox was
-      // ticked — so it goes with the worktree. A branch someone has since committed to is refused by
-      // `force: false`, which is the answer we want: the worktree is already gone and the commits stay.
-      return run(() => commands.deleteBranch({ branch: entry.branch, force: false })).then(() => {
-        worktreeIntents.forget(entry.workspaceId)
-        pick(entry.baseWorkspaceId)
-      })
-    }).catch((reason: unknown) => {
-      setOpenFailure(reason instanceof Error ? reason.message : String(reason))
-    })
-  }, [commands, run, pick])
-
-  const items: readonly MenuEntry[] = workspaces.map(workspace => ({
+  const projectRows: readonly PickerRow[] = workspaces.map(workspace => ({
     id: workspace.workspaceId,
     label: workspace.title,
+    detail: workspace.path,
     icon: <IconFolderClose16 size={16} />,
+    selected: workspace.workspaceId === selectedId,
   }))
 
-  // The menu opens on the owner's toggle, but never as the empty popover the "no workspaces" case
-  // would otherwise produce — the effect above has already turned that gesture into the chooser.
-  const menuOpen = open && workspaces.length > 0
-  // The control needs a repository it could actually branch: a deployment without git, a workspace
-  // that is not a repository, and a workspace whose reading has not landed yet all hide it rather
-  // than offering something it cannot do.
-  const worktreeOffered = view !== null && view.showChip && view.gitAvailable
-    && commands !== null && overview !== null
+  const repo = overview?.repo
+  // The pill needs a repository it can actually branch: no git, a folder that is not a repository,
+  // and a reading that has not landed yet all hide it rather than offering something it cannot do.
+  const pillOffered = selectedId !== undefined && view !== null && view.showChip && view.gitAvailable
+    && commands !== null && repo !== undefined
+  // A staged worktree the project turns out not to support must not linger: the send gate acts on
+  // the staged choice, and with no pill on screen nobody could see or untick it. A reading that has
+  // merely not landed yet is not grounds — the pill comes back as soon as it does.
+  const unsupported = view !== null && (!view.showChip || !view.gitAvailable)
+    || failure?.code === 'not-a-repository'
+  useEffect(() => {
+    if (unsupported && selectedId !== undefined) stagedSessions.clear(selectedId)
+  }, [unsupported, selectedId])
+
+  const worktree = staged?.worktree === true
+  const shownBranch = worktree && staged?.baseBranch !== undefined
+    ? staged.baseBranch
+    : repo === undefined ? '' : branchLabel(repo, t('chip.detached'))
+
+  const branchRows: readonly PickerRow[] = (overview?.branches ?? []).map(branch => ({
+    id: branch.name,
+    label: branch.name,
+    ...branch.kind === 'remote' ? { detail: t('branches.remote') } : {},
+    icon: <IconBranchOutline16 size={14} />,
+    selected: branch.name === shownBranch,
+  }))
+
+  const closeBranches = useCallback((): void => {
+    setBranchesOpen(false)
+    clearFailure()
+  }, [clearFailure])
+
+  const pickBranch = (branch: string): void => {
+    if (selectedId === undefined || commands === null) return
+    if (worktree) {
+      // Staged only: the worktree starts from this branch when the first prompt is sent.
+      stagedSessions.update(selectedId, { baseBranch: branch })
+      closeBranches()
+      return
+    }
+    if (repo?.branch === branch) { closeBranches(); return }
+    // The session will run in the project folder, so the folder itself moves to the branch. No
+    // carrying: a switch that would drop uncommitted work is refused, and the refusal stays visible.
+    void run(() => commands.checkout({ branch, carryChanges: false })).then((result) => {
+      if (result !== null) closeBranches()
+    })
+  }
+
+  const toggleWorktree = (checked: boolean): void => {
+    if (selectedId === undefined) return
+    if (checked) stagedSessions.update(selectedId, { worktree: true })
+    // Unticking forgets the base too: the pill goes back to showing where the folder really is.
+    else stagedSessions.clear(selectedId)
+  }
 
   return (
     <>
-      <Menu
-        open={menuOpen}
-        anchor={null}
-        items={items}
-        selectedId={selectedId}
-        onSelect={(id) => { pick(id as WorkspaceId) }}
+      <PickerPopover
+        open={open && workspaces.length > 0}
+        anchorRef={anchorRef ?? noAnchor}
         onClose={onClose}
-        side="bottom"
-        portal
-        getAnchorRect={getAnchorRect}
+        rows={projectRows}
+        onPick={(id) => { pick(id as WorkspaceId) }}
+        placeholder={t('hero.projects.search')}
+        ariaLabel={t('hero.projects.title')}
+        emptyText={t('hero.projects.empty')}
+        action={{
+          label: t('hero.projects.browse'),
+          icon: <IconFolderOpenOutline16 size={16} />,
+          onSelect: browse,
+        }}
       />
 
-      <Tooltip label={t('hero.open.tooltip')} side="bottom" delayMs={250}>
-        <button
-          type="button"
-          className={css.heroOpen}
-          disabled={picking}
-          onClick={openWorkspace}
-        >
-          <IconFolderOpen16 className={css.heroIcon} size={16} />
-          <span className={css.heroText}>{t('hero.open')}</span>
-        </button>
-      </Tooltip>
-
-      {worktreeOffered && (
-        <Tooltip label={t('hero.worktree.tooltip')} side="bottom" delayMs={250}>
-          <label className={css.heroCheck}>
-            <input
-              type="checkbox"
-              className={css.heroCheckBox}
-              checked={intent !== undefined}
-              disabled={busy}
-              onChange={() => {
-                if (intent === undefined) check()
-                else uncheck(intent)
-              }}
-            />
-            <span className={css.heroText}>{t('hero.worktree')}</span>
-          </label>
-        </Tooltip>
+      {pillOffered && (
+        <span className={css.heroPill} role="group" aria-label={t('chip.aria')}>
+          <Tooltip
+            label={t(worktree ? 'hero.branch.base.tooltip' : 'hero.branch.tooltip')}
+            side="bottom"
+            delayMs={250}
+            disabled={branchesOpen}
+          >
+            <button
+              ref={branchAnchor}
+              type="button"
+              className={css.heroPillBranch}
+              aria-haspopup="dialog"
+              aria-expanded={branchesOpen}
+              disabled={busy && !branchesOpen}
+              onClick={() => { if (branchesOpen) closeBranches(); else setBranchesOpen(true) }}
+            >
+              <IconBranchOutline16 className={css.heroIcon} size={14} />
+              <span className={css.heroText}>{elideMiddle(shownBranch, 24)}</span>
+              <IconChevronDownOutline14 className={css.heroIcon} size={12} />
+            </button>
+          </Tooltip>
+          <span className={css.heroPillDivider} aria-hidden="true" />
+          <Tooltip
+            label={t('hero.worktree.tooltip', { branch: shownBranch })}
+            side="bottom"
+            delayMs={250}
+          >
+            <label className={css.heroPillCheck}>
+              <input
+                type="checkbox"
+                className={css.heroCheckBox}
+                checked={worktree}
+                onChange={(event) => { toggleWorktree(event.target.checked) }}
+              />
+              <span className={css.heroText}>{t('hero.worktree')}</span>
+            </label>
+          </Tooltip>
+        </span>
       )}
 
-      {(failure !== null || openFailure !== undefined) && (
-        <div className={css.heroError}>
-          <FailureStrip failure={failure} t={t} />
-          {openFailure !== undefined && (
-            <span className={css.heroErrorText} role="alert">{openFailure}</span>
-          )}
-        </div>
+      <PickerPopover
+        open={pillOffered && branchesOpen}
+        anchorRef={branchAnchor}
+        onClose={closeBranches}
+        rows={branchRows}
+        onPick={pickBranch}
+        placeholder={t('branches.search')}
+        ariaLabel={t('branches.title')}
+        emptyText={t('branches.empty')}
+        error={branchesOpen ? failure?.message ?? null : null}
+        busy={busy}
+      />
+
+      {browseFailure !== undefined && (
+        <span className={css.heroError} role="alert">{browseFailure}</span>
       )}
     </>
   )

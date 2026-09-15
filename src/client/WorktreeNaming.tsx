@@ -2,6 +2,10 @@
  * The session-header half of the worktree checkbox: it gives a freshly created worktree its real
  * name.
  *
+ * **Legacy.** Only worktrees recorded by an earlier build in `./intents.ts` reach this seat; the
+ * current first-send gate (`./SendGate.tsx`) names the branch at creation, so there is nothing left
+ * to rename for worktrees it makes.
+ *
  * The new-session surface has to create the worktree before the session exists — a session runs in a
  * directory, and the worktree is the directory — but the only thing worth naming it after is the
  * prompt, which arrives afterwards. So the branch starts provisional and this seat, which is the one

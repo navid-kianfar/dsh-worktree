@@ -1,6 +1,11 @@
 /**
  * The worktree this surface created for a blank session, remembered until the session has a name.
  *
+ * **Legacy.** Builds before the first-send gate created the worktree the moment the box was ticked,
+ * on a provisional branch, and recorded it here. The current build names the branch when it creates
+ * the worktree (see `./SendGate.tsx`) and writes no intents; this store is still read so that a
+ * worktree an earlier build left behind in this browser gets its branch renamed as promised.
+ *
  * A worktree has to exist before a session can be pointed at it, but the name that describes the
  * task only exists once someone has typed a prompt — so the new-session surface creates the worktree
  * on a provisional branch and this store is the thread back to it: which workspace it became, which

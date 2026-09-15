@@ -76,9 +76,13 @@ function loadBundle(): Record<string, unknown> {
 /**
  * A Context stub recording every slot registration, with the services the bundle reads at apply time.
  * @param registrations - collects each `slots.register` call.
+ * @param services - what `ctx.get` answers, by service name; absent names read as not composed.
  * @returns a context shaped like the client root the harness hands a plugin.
  */
-function fakeContext(registrations: Registration[]): unknown {
+function fakeContext(
+  registrations: Registration[],
+  services: Record<string, unknown> = { uiWorkspace: { pickDirectory: async () => null } },
+): unknown {
   const remote = {
     $mount: async () => undefined,
     worktree: {
@@ -93,11 +97,12 @@ function fakeContext(registrations: Registration[]): unknown {
       return () => {}
     },
   }
+  // Only what the installed Workspace Controller has: navigation (`startSession`) is `uiWorkspace`'s,
+  // and there is no path opener here at all.
   const workspaces = {
     create: async () => ({ workspaceId: 'ws' }),
     rename: async () => undefined,
-    startSession: () => undefined,
-    openPath: async () => undefined,
+    delete: async () => undefined,
   }
   const ctx = {
     remote,
@@ -109,7 +114,7 @@ function fakeContext(registrations: Registration[]): unknown {
     // The bundle registers its seats from a CHILD plugin so the child can inject the Remote
     // namespace the parent just mounted; running the child body inline is what a real fiber does.
     plugin: (child: { apply?: (scope: unknown) => void }) => { child.apply?.(ctx) },
-    get: (name: string) => (name === 'uiWorkspace' ? { pickDirectory: async () => null } : undefined),
+    get: (name: string) => services[name],
   }
   return ctx
 }
@@ -123,19 +128,32 @@ describe.skipIf(!built)('the built client bundle', () => {
    * Load the bundle and run its apply against a recording context.
    * @returns the captured registrations.
    */
-  async function applyBundle(): Promise<Registration[]> {
+  async function applyBundle(services?: Record<string, unknown>): Promise<Registration[]> {
     const bundle = loadBundle()
-    await (bundle['apply'] as (ctx: unknown) => Promise<void>)(fakeContext(registrations))
+    await (bundle['apply'] as (ctx: unknown) => Promise<void>)(fakeContext(registrations, services))
     return registrations
   }
 
-  it('registers the chip, the naming watcher, and the shadowing hero picker', async () => {
+  /**
+   * Apply the bundle and build the header chip's injected face.
+   * @param services - what `ctx.get` answers.
+   * @returns the chip's face.
+   */
+  async function chipFace(services: Record<string, unknown>): Promise<Record<string, (...args: never[]) => unknown>> {
+    const captured = await applyBundle(services)
+    const chip = captured.find(entry =>
+      entry.name === 'conversation.session.header.utilities' && entry.options['id'] === 'worktree')
+    return (chip?.options['inject'] as () => Record<string, (...args: never[]) => unknown>)()
+  }
+
+  it('registers the chip, the hero toolbar, the send gate, the naming watcher, and the card', async () => {
     const captured = await applyBundle()
     const names = captured.map(entry =>
       `${entry.name}#${String(entry.options['id'] ?? entry.options['key'] ?? '')}`)
     expect(names).toEqual([
       'conversation.session.header.utilities#worktree',
       'conversation.hero.workspace#',
+      'conversation.input.left#worktree-send-gate',
       'conversation.session.header.utilities#worktree-naming',
       'settings.plugin.item#worktree',
     ])
@@ -161,19 +179,118 @@ describe.skipIf(!built)('the built client bundle', () => {
       expect(face).toMatchObject({ describeWorktree: expect.any(Function) })
     }
     // The two git seats bind operations; the card owns settings instead and gets no command set.
-    for (const key of ['conversation.session.header.utilities#worktree', 'conversation.session.header.utilities#worktree-naming']) {
+    for (const key of [
+      'conversation.session.header.utilities#worktree',
+      'conversation.session.header.utilities#worktree-naming',
+      'conversation.input.left#worktree-send-gate',
+    ]) {
       expect(faces.get(key), key).toMatchObject({ commandsFor: expect.any(Function) })
     }
     expect(faces.get('conversation.hero.workspace#')).toMatchObject({
       commandsFor: expect.any(Function),
       pickDirectory: expect.any(Function),
       createWorkspace: expect.any(Function),
-      renameWorkspace: expect.any(Function),
-      suggestBranchName: expect.any(Function),
     })
+    // Naming and renaming moved to the send gate; the toolbar no longer carries them.
+    expect(faces.get('conversation.hero.workspace#')).not.toHaveProperty('renameWorkspace')
+    expect(faces.get('conversation.hero.workspace#')).not.toHaveProperty('suggestBranchName')
+    // The gate reaches harness facilities through `ctx.get`; with none composed it must still answer.
+    const gate = faces.get('conversation.input.left#worktree-send-gate') as Record<string, (...args: unknown[]) => unknown>
+    expect(gate).toMatchObject({
+      createWorkspace: expect.any(Function),
+      suggestBranchName: expect.any(Function),
+      renameWorkspace: expect.any(Function),
+      deleteWorkspace: expect.any(Function),
+      menuClaimsEnter: expect.any(Function),
+      currentSession: expect.any(Function),
+      block: expect.any(Function),
+      notify: expect.any(Function),
+    })
+    expect(gate['menuClaimsEnter']?.('s1')).toBe(false)
+    expect(gate['currentSession']?.()).toBeUndefined()
+    expect(() => { gate['block']?.('s1', 'busy') }).not.toThrow()
+    expect(() => { gate['notify']?.('s1', 'failed') }).not.toThrow()
     expect(faces.get('settings.plugin.item#worktree')).toMatchObject({
       hooks: expect.any(Object),
       setField: expect.any(Function),
     })
+  })
+
+  it('opens a session in an adopted worktree through uiWorkspace, not the Workspace Controller', async () => {
+    const started: unknown[] = []
+    const chip = await chipFace({
+      uiWorkspace: { pickDirectory: async () => null, startSession: (id: unknown) => { started.push(id) } },
+    })
+    const adopt = chip['adoptWorkspace'] as (path: string, openSession: boolean) => Promise<void>
+    await adopt('/repo-wt', false)
+    expect(started).toEqual([])
+    await adopt('/repo-wt', true)
+    expect(started).toEqual(['ws'])
+  })
+
+  it('refuses to open a session when no workspace navigation is composed', async () => {
+    const chip = await chipFace({})
+    const adopt = chip['adoptWorkspace'] as (path: string, openSession: boolean) => Promise<void>
+    await expect(adopt('/repo-wt', false)).resolves.toBeUndefined()
+    await expect(adopt('/repo-wt', true)).rejects.toThrow(/no workspace navigation/)
+  })
+
+  it('reveals a path through the Session Remote file-manager handoff', async () => {
+    const requests: unknown[] = []
+    const chip = await chipFace({
+      'remote.session': {
+        canOpenWorkspacePath: async () => ({ ok: true, value: true }),
+        openWorkspacePath: async (request: unknown) => {
+          requests.push(request)
+          return { ok: true, value: { opened: true } }
+        },
+      },
+    })
+    await expect((chip['canRevealPath'] as () => Promise<boolean>)()).resolves.toBe(true)
+    await (chip['revealPath'] as (path: string) => Promise<void>)('/repo-wt')
+    expect(requests).toEqual([{ action: 'reveal', path: '/repo-wt' }])
+  })
+
+  it('reports reveal as unsupported, and rejects it, when the Host cannot', async () => {
+    const failing = await chipFace({
+      'remote.session': {
+        canOpenWorkspacePath: async () => ({ ok: true, value: false }),
+        openWorkspacePath: async () => ({ ok: false, error: { code: 'gateway/internal', message: 'no opener' } }),
+      },
+    })
+    await expect((failing['canRevealPath'] as () => Promise<boolean>)()).resolves.toBe(false)
+    await expect((failing['revealPath'] as (path: string) => Promise<void>)('/x')).rejects.toThrow(/no opener/)
+    registrations = []
+    const absent = await chipFace({})
+    await expect((absent['canRevealPath'] as () => Promise<boolean>)()).resolves.toBe(false)
+    await expect((absent['revealPath'] as (path: string) => Promise<void>)('/x')).rejects.toThrow(/no session remote/)
+  })
+
+  /**
+   * Apply the bundle and build the send gate's injected face.
+   * @param services - what `ctx.get` answers.
+   * @returns the gate's face.
+   */
+  async function gateFace(services: Record<string, unknown>): Promise<Record<string, (...args: never[]) => unknown>> {
+    const captured = await applyBundle(services)
+    const gate = captured.find(entry => entry.options['id'] === 'worktree-send-gate')
+    return (gate?.options['inject'] as () => Record<string, (...args: never[]) => unknown>)()
+  }
+
+  it('leaves Enter to a trigger menu only while a row is highlighted, as the harness keymap does', async () => {
+    let menu: { open: boolean, highlight: unknown } = { open: true, highlight: null }
+    const services = {
+      sessions: { scope: (id: string) => ({ id }), list: { getSnapshot: () => ({ current: 's1' }) } },
+      inputTriggers: { sessionOf: () => ({ menu: { getSnapshot: () => menu } }) },
+    }
+    const gate = await gateFace(services)
+    const claims = gate['menuClaimsEnter'] as (sessionId: string) => boolean
+    // Open but still loading: nothing highlighted, so Enter sends — and the gate must own that send.
+    expect(claims('s1')).toBe(false)
+    menu = { open: true, highlight: { source: 'file', index: 0 } }
+    expect(claims('s1')).toBe(true)
+    menu = { open: false, highlight: null }
+    expect(claims('s1')).toBe(false)
+    expect((gate['currentSession'] as () => string | undefined)()).toBe('s1')
   })
 })

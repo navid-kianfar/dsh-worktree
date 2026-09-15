@@ -26,8 +26,8 @@ export interface WorktreePanelProps {
   t: TranslateNS<'worktree'>
   /** Open (or reuse) a session in a worktree directory. */
   onOpen: (path: string) => void
-  /** Show a worktree's directory in the host's file manager. */
-  onReveal: (path: string) => void
+  /** Show a worktree's directory in the host's file manager; absent when the Host cannot. */
+  onReveal?: (path: string) => void
   /** Lock or unlock a worktree. */
   onLock: (path: string, locked: boolean) => void
   /** Open the removal confirmation. */
@@ -67,9 +67,10 @@ export function WorktreePanel(props: WorktreePanelProps) {
 
       <ul className={css.list}>
         {overview.worktrees.map((entry) => {
-          const items: RowMenuItem[] = [
-            { id: 'reveal', label: t('worktrees.reveal'), onSelect: () => { onReveal(entry.path) } },
-          ]
+          const items: RowMenuItem[] = []
+          if (onReveal !== undefined) {
+            items.push({ id: 'reveal', label: t('worktrees.reveal'), onSelect: () => { onReveal(entry.path) } })
+          }
           if (!entry.main) {
             items.push(
               {
@@ -119,9 +120,13 @@ export function WorktreePanel(props: WorktreePanelProps) {
                   </span>
                 )}
               </button>
-              <span className={css.rowActions}>
-                <RowMenu label={basenameOf(entry.path)} items={items} />
-              </span>
+              {/* The main worktree on a Host without reveal has no row action at all; an empty menu
+                  would be a trigger that opens nothing. */}
+              {items.length > 0 && (
+                <span className={css.rowActions}>
+                  <RowMenu label={basenameOf(entry.path)} items={items} />
+                </span>
+              )}
             </li>
           )
         })}
