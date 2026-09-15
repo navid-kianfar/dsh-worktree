@@ -1,6 +1,6 @@
 /**
- * The worktree card on the plugin-configuration tab: whether git can answer here, and the thirteen
- * preferences that shape what the header control does.
+ * The worktree card on the plugin-configuration tab: whether git can answer here, and the eleven
+ * preferences that shape what the worktree controls do.
  *
  * The card reproduces the configuration section's own chrome — an `<li>` disclosure card, and fields
  * laid out label / control / hint — because it cannot import those components: value-importing

@@ -1,137 +1,264 @@
 # @achasoft/dsh-worktree
 
-Git worktrees and branches for the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web Client.
+Git branches and worktrees for the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) Web Client. On the new-session screen it adds a project switcher and a branch pill with a **worktree** checkbox. Tick it and your first message runs in a fresh git worktree on a new branch named after that message. Once a session is running, a slim row above the composer shows the branch and worktree it is in, and lets you switch, create, rename, delete, lock, and prune them. git runs on the host. The browser never runs a git command itself.
 
-Once a session has started, a slim row directly above the composer says which branch and which worktree it is working in. Clicking either half opens a switcher, upward; the `+` beside them creates a new worktree, adopts its directory as a harness Workspace, and opens a session there.
+![New-session toolbar: project switcher, mode chip, and the branch pill with the worktree checkbox above the composer](https://raw.githubusercontent.com/navid-kianfar/dsh-worktree/main/docs/screenshots/new-session-toolbar.png)
 
-```
- ⑂ main ↑2 • │ ⧉ my-repo 2   +
-   └ branch    └ worktree     └ new worktree
- ╭──────────────────────────────────────────╮
- │ Ask anything…                            │   ← the composer
- ╰──────────────────────────────────────────╯
-```
+## Features
 
-The row is not drawn on the blank new-session screen — the pill below covers that screen — nor in a session whose folder is not a repository.
+### New-session toolbar
 
-The plugin also owns the **new-session row**, laid out like Claude Code's: where the session runs, in what mode, and on which branch. It takes that seat by shadowing the core workspace picker at a lower slot priority, so no harness source is patched and uninstalling the plugin hands the seat straight back.
+On a blank new chat, the row above the composer reads: **project switcher**, the harness's own **mode chip**, and a **branch pill** holding the branch and a **worktree** checkbox.
 
-```
- 📁 my-repo ▾    ◇ Standard mode ▾    ⑂ main ▾ │ ☐ worktree
-   └ project        └ the harness's       └ branch   └ run in a new
-     switcher         own mode chip                    git worktree
-```
+**Project switcher.** Opens a searchable list of your workspaces with **Browse for folder…** at the bottom. That entry opens the host's folder chooser, registers the folder as a workspace, and moves the new session there. If you have no workspaces yet, opening the switcher goes straight to the chooser.
 
-Whenever a project is selected the pill holds that third place. While the first reading is on its way it is a neutral placeholder; for a folder that is not a git repository — or when git cannot run on the host, or the control is switched off — it stays, disabled, reading **no git**, with the reason in its tooltip. When the reading itself fails (a timeout, git exiting with an error, the request not reaching the host) it reads **git error** with git's message as its tooltip, and the reading is retried with backoff.
+![Project picker dropdown with a search field, the workspace list, and "Browse for folder…"](https://raw.githubusercontent.com/navid-kianfar/dsh-worktree/main/docs/screenshots/project-picker.png)
 
-## What it does
+**Branch pill.** Shows the branch the session will start on.
 
-**Branches** — list local and remote-tracking branches with their tip commit, author, age, and ahead/behind counters; filter them by fuzzy search — and when the list was cut at `maxBranches`, typing also asks the host for every branch whose name contains the text, so a branch past the ceiling is found rather than offered as a new one; switch, create, rename, and delete. A branch already checked out in another worktree says so and jumps there instead of failing, because git refuses to check one branch out twice. `Fetch` updates remote-tracking refs and prunes the ones whose remote branch is gone.
+- **Worktree unticked.** The session runs in the project folder, so picking a branch switches that folder to it. A switch that would overwrite uncommitted changes is refused, and git's message appears in the dropdown.
+- **Worktree ticked.** Nothing is created yet. The branch you pick is the base the new worktree will start from, and the project folder is left alone.
 
-**Worktrees** — list every worktree of the repository with its branch, path, and lock or prunable state; open a session in one; lock, unlock, remove, and prune. The worktree the current session is working in cannot be removed from its own row. Creating a worktree fills its directory from a configurable path template, then optionally registers it as a Workspace and starts a session in it.
+When a repository has more branches than `maxBranches`, the list says so. Typing a search then also asks the host, so a branch past the limit can still be found.
 
-**Project switcher** — the session-start chip opens a searchable list of your Workspaces (names match fuzzily, paths as plain text) with **Browse for folder…** underneath, which opens the host's own folder chooser and starts a session in whatever it returns.
+![Branch picker dropdown under the pill, with a search field and local and remote branches](https://raw.githubusercontent.com/navid-kianfar/dsh-worktree/main/docs/screenshots/branch-picker.png)
 
-**Branch** — the pill shows the branch the session will start on. With worktree unticked the session runs in the project folder, so picking a branch switches that folder to it; git refuses a switch that would lose uncommitted work, and the refusal is shown in the dropdown. With worktree ticked, the pick is the branch the new worktree starts from, and the project folder is left alone.
+**First send with the worktree ticked.** When you press Enter or the send button, the plugin:
 
-**Worktree checkbox** — tick it and the session runs in a **fresh git worktree** instead of the repository itself. Ticking creates nothing. When you send the first message, the worktree is created from the chosen branch on a new branch **named from that message** — by your deployment's own model, falling back to a slug of the prompt — and the message is sent from inside it. Unticking before you send leaves nothing behind. A project that is not a git repository shows the pill disabled as **no git**, and a worktree staged before that was known is unticked.
+1. locks the composer;
+2. asks the deployment's current model for a branch name based on your message. With no model, or if the call fails, it uses a slug of the message. `branchPrefix` is prepended, and a taken name gets a `-2`, `-3`, … suffix;
+3. runs `git worktree add -b <name>` from the chosen base branch, at the path `worktreePathTemplate` gives;
+4. registers the worktree as a workspace named after the branch, moves the draft and its attachments there, and sends it.
 
-**Uncommitted work is never discarded.** A checkout with local changes uses `git switch --merge`, which carries them across and aborts on conflict. A force-delete or force-remove is a separate switch, and by default also needs the branch or worktree name typed to confirm. Ignored files get their own gate, because `git worktree remove` deletes them even unforced: the removal dialog first reads the worktree, lists its ignored entries (a `.env`, a build directory), and will not remove it until you tick that they may go — and the host refuses a removal over ignored files without that acknowledgement.
+If you leave the session before the worktree is ready, or the move does not finish in time, the workspace, the worktree, and the new branch are removed again. Your message stays unsent in the composer, and you get a notice.
+
+**Pill states.** Whenever a project is selected, the pill keeps its place in the row:
+
+| Pill reads | Meaning |
+| --- | --- |
+| grey placeholder | The first reading has not arrived yet. |
+| **no git** (disabled) | The folder is not a git repository, git cannot run on the host, or `showChip` is off. The tooltip says which. |
+| **git error** (disabled) | The reading failed, for example on a timeout. The tooltip shows git's message, and the reading is retried with backoff. |
+
+![Disabled "no git" pill on the new-session screen for a folder that is not a git repository](https://raw.githubusercontent.com/navid-kianfar/dsh-worktree/main/docs/screenshots/no-git.png)
+
+### Branch and worktree row (active session)
+
+After the first message, a row directly above the composer shows `⑂ branch ↑ahead ↓behind •` and the current worktree's name with a count of worktrees. The dot means uncommitted changes. A **+** button next to it creates a new worktree. The row re-reads the repository every `refreshIntervalMs`. The popovers open upward.
+
+The row is hidden in sessions whose folder is not a git repository, when git is unavailable, and when `showChip` is off.
+
+![Branch popover opened from the row above the composer, listing local branches with their tip commits, fetch and refresh buttons, and a search field](https://raw.githubusercontent.com/navid-kianfar/dsh-worktree/main/docs/screenshots/worktree-row.png)
+
+![Worktree popover listing the repository's worktrees, with New worktree at the bottom](https://raw.githubusercontent.com/navid-kianfar/dsh-worktree/main/docs/screenshots/worktree-menu.png)
+
+**Branch popover.** Local and remote-tracking branches, each with its tip commit, author, age, and ahead/behind counts, plus a search field.
+
+- Switch to a branch. When the worktree has uncommitted changes, a **Carry uncommitted changes** switch appears. It runs `git switch --merge`, which aborts on conflict. Without it, git refuses a switch that would overwrite changes.
+- Picking a remote branch creates the matching local branch that tracks it. If the local branch already exists, the plugin switches to it.
+- A branch already checked out in another worktree offers to open that worktree instead, because git will not check one branch out twice.
+- Create a branch from the search text, open a new worktree for a branch, or rename or delete a local branch.
+- **Fetch and prune remotes** runs `git fetch --all --prune`.
+
+**Worktree popover.** Every worktree of the repository, marked main, current, detached, locked, or prunable.
+
+- **Open a session here** registers the worktree as a workspace and opens a session in it.
+- **Show in file manager** appears only when the host supports revealing a path.
+- **Lock** / **Unlock** and **Remove…** are available for linked worktrees. The main worktree cannot be locked or removed, and neither can the worktree the current session runs in.
+- **Prune stale records** runs `git worktree prune`.
+
+**New worktree dialog** (the **+** button). Choose a new or existing branch and an optional start point. The directory is prefilled from `worktreePathTemplate` and can be edited. It must not exist, or must be an empty directory. **Register as a workspace** and **Open a session after creating** default to `registerWorkspace` and `openSession`.
+
+**Destructive actions.**
+
+- A force-delete of an unmerged branch, or a force-remove of a worktree with uncommitted changes, needs the name typed to confirm while `confirmDestructive` is on.
+- `git worktree remove` deletes *ignored* files (a `.env`, a build directory) even without force. So the remove dialog lists them first and needs its own checkbox before removing them, whatever `confirmDestructive` is set to. The host refuses such a removal without that acknowledgement.
+- Remote branches are never deleted.
+- Removing a worktree does not unregister its workspace. Remove the workspace from the sidebar yourself.
+
+### Settings card
+
+**Settings → Plugins → Worktrees and branches** shows whether git was found on the host, with its version, and edits the preferences. See [Configuration](#configuration).
+
+![Worktrees and branches settings card, expanded](https://raw.githubusercontent.com/navid-kianfar/dsh-worktree/main/docs/screenshots/settings.png)
 
 ## Requirements
 
-- DeepSeek Harness with the `web` app.
-- `git` on the host process PATH. `git switch` is used, so **git 2.23 or newer**; git 2.36 adds the NUL-separated worktree listing this plugin prefers and the `locked`/`prunable` attributes it reads, and below that it falls back cleanly.
-- The `@deepseek-ai/dsh-subprocess` and `@deepseek-ai/dsh-fs` capabilities, both of which the base bundle mounts. Without either, the row above the composer stays hidden, the new-session pill reads **no git**, and the settings card says which one is missing.
-- A composed directory picker (`ui-directory-picker-native` or `-browse`, mounted automatically by the web app) for **Browse for folder…**. Without one the row reports that no chooser exists and everything else keeps working.
-- Optional: a default model (`agentDefaultModel`) for the worktree branch name. Without one the name is the deterministic slug of your prompt.
+- **DeepSeek Harness 0.1.5-rc.2**, with the `web` profile. This is the version the plugin is tested against. Node `^22.19 || >=24`, as in `engines`.
+- **git 2.23 or newer** on the host process `PATH`, because the plugin uses `git switch`. With git 2.36 or newer, the plugin reads the worktree list in NUL-separated form and also reads the `locked` and `prunable` flags. With older git it reads the plain listing, which does not show those two flags.
+- **pnpm** on `PATH`, because `dsh plugin` runs pnpm.
+- Harness capabilities, all mounted by the base bundle:
+  - `@deepseek-ai/dsh-subprocess` and `@deepseek-ai/dsh-fs`, required to run git. Without either, the row stays hidden, the pill reads **no git**, and the settings card names what is missing.
+  - A directory picker (`dsh-client-ui-directory-picker-native` or `-browse`) for **Browse for folder…**. Without one, that entry reports that no chooser exists.
+  - Optional: `llm` and `agentDefaultModel` for model-written branch names. Without them the name is a slug of the message.
+  - Optional: the settings service. Without it, the values from `cordis.patch.yml` apply and the card cannot save changes.
+- **OS:** developed and tested on macOS. The code has no platform-specific git handling. Linux and Windows are not verified.
 
 ## Install
 
-```sh
+```bash
 dsh plugin --profile web add @achasoft/dsh-worktree
+dsh web
 ```
 
-Then add it to the profile's bundle list in `$DSH_HOME/profiles/web/package.json`:
+`dsh plugin --profile <name> …` runs pnpm with the remaining arguments in `$DSH_HOME/profiles/<name>` (default `~/.dsh/profiles/web`), creating the profile first if it does not exist. After pnpm succeeds, dsh adds every dependency whose `package.json` declares `dsh.bundle` to that profile's `dsh.profile.bundles` list. This package declares `"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }`, so it becomes a profile layer with no manual edit. Restart `dsh web` after installing.
 
-```json
-{
-  "dsh": {
-    "profile": {
-      "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@achasoft/dsh-worktree"]
-    }
-  }
-}
+To uninstall, remove the package. dsh also drops it from `dsh.profile.bundles`:
+
+```bash
+dsh plugin --profile web remove @achasoft/dsh-worktree
 ```
 
-Restart the profile. Nothing else is required — there is no provider to choose and no credential to supply.
+### How `cordis.patch.yml` is applied
 
-## Settings
+At boot, dsh builds the configuration from patch layers, in this order:
 
-Every field is editable from **Settings → Plugins → Worktrees and branches**, and from your profile's `cordis.patch.yml` by the `worktree` id. Changes take effect on the next request; nothing needs a restart.
+1. Each bundle's `cordis.patch.yml`, in `dsh.profile.bundles` order. This package's file inserts two rows.
+2. The profile's own `$DSH_HOME/profiles/<name>/cordis.patch.yml`.
+3. `$DSH_HOME/cordis.patch.yml`, which applies to every profile.
+4. Any `--patch <file>` overlays.
 
-| Field | Default | What it does |
+A later layer overrides an earlier one by row `id`. The two rows this package inserts:
+
+| id | name | Role |
 | --- | --- | --- |
-| `showChip` | `true` | Render the branch and worktree row above the composer and an enabled new-session pill. Off keeps the endpoints and this card. |
-| `worktreePathTemplate` | `{repoParent}/{repo}-worktrees/{branch}` | Where a new worktree goes. See below. |
-| `branchPrefix` | `''` | Prefilled when creating a branch, e.g. `feature/`. |
-| `registerWorkspace` | `true` | Adopt a worktree's directory as a harness Workspace. |
-| `openSession` | `true` | Open a session in that Workspace. Requires `registerWorkspace`. |
-| `includeRemoteBranches` | `true` | List remote-tracking branches beside the local ones. |
-| `maxBranches` | `200` | Most branches one reading returns; the list says when it truncated, and a typed search then also asks the host. |
-| `refreshIntervalMs` | `15000` | How often the row re-reads. `0` reads only on an explicit refresh. |
-| `gitTimeoutMs` | `20000` | Bound for a local git command. |
-| `networkTimeoutMs` | `120000` | Bound for a command that contacts a remote. Never below `gitTimeoutMs`. |
-| `maxOutputBytes` | `1048576` | In-memory cap per captured git stream. |
-| `graceMs` | `5000` | TERM-to-KILL grace when a git command is terminated. |
-| `confirmDestructive` | `true` | Require typing the name before a force-delete or force-remove. Removing a worktree that holds ignored files always needs its own acknowledgement. |
+| `worktree` | `@achasoft/dsh-worktree/host` | Host service: git over RPC, and the `worktree` settings section. |
+| `worktree-ui` | `@achasoft/dsh-worktree` | Browser half. It must be the bare package name, because the Web Client finds browser code by resolving `<row name>/package.json`. |
+
+To see the composed result:
+
+```bash
+dsh --profile web --dump-config
+```
+
+## Configuration
+
+Every key lives in the `config` of the `worktree` row. To override keys, add the row to your profile's `cordis.patch.yml` by `id`. Restate **every** key, because a patch replaces the row's whole `config`:
+
+```yaml
+- id: worktree
+  config:
+    showChip: true
+    worktreePathTemplate: '{repoParent}/{repo}-worktrees/{branch}'
+    branchPrefix: 'feature/'
+    registerWorkspace: true
+    openSession: true
+    includeRemoteBranches: true
+    maxBranches: 200
+    refreshIntervalMs: 15000
+    gitTimeoutMs: 20000
+    networkTimeoutMs: 120000
+    maxOutputBytes: 1048576
+    graceMs: 5000
+    confirmDestructive: true
+```
+
+The host schema declares no defaults, and every key except `branchPrefix` is required. The defaults below are the values `cordis.patch.yml` ships. Values saved from the settings card are stored as a user layer over the patch value. The host reads settings on each request, so changes need no restart.
+
+| Key | Default | Card | What it does |
+| --- | --- | --- | --- |
+| `showChip` | `true` | yes | Shows the row above the composer and an enabled new-session pill. When off, the pill reads **no git** and the RPC endpoints and settings card stay available. |
+| `worktreePathTemplate` | `{repoParent}/{repo}-worktrees/{branch}` | yes | Directory for a new worktree. See [Path template](#path-template). |
+| `branchPrefix` | `''` | yes | Prefix added to new branch names: first-send names, and branches created from the branch popover or the create dialog. Example: `feature/`. |
+| `registerWorkspace` | `true` | yes | Default for **Register as a workspace** in the create dialog. |
+| `openSession` | `true` | yes | Default for **Open a session after creating**. Requires `registerWorkspace`. |
+| `includeRemoteBranches` | `true` | yes | Lists remote-tracking branches next to local ones. |
+| `maxBranches` | `200` | yes | Most branches returned per reading (minimum 1). The list says when it was cut. |
+| `refreshIntervalMs` | `15000` | yes, in seconds | How often the row re-reads. `0` means read only on explicit refresh. |
+| `gitTimeoutMs` | `20000` | yes, in seconds | Time limit for a local git command (minimum 1000). |
+| `networkTimeoutMs` | `120000` | yes, in seconds | Time limit for `fetch` (minimum 1000). Must not be less than `gitTimeoutMs`. |
+| `maxOutputBytes` | `1048576` | no | Memory cap for each captured git output stream (minimum 4096). |
+| `graceMs` | `5000` | no | Delay between TERM and KILL when a git command is stopped. |
+| `confirmDestructive` | `true` | yes | Requires typing the name before a force-delete or force-remove. |
+
+The host refuses a configuration at load, and the card refuses to save it, when:
+
+- `worktreePathTemplate` is empty or contains neither `{branch}` nor `{branchPath}`;
+- `networkTimeoutMs` is less than `gitTimeoutMs`;
+- `openSession` is `true` while `registerWorkspace` is `false`.
 
 ### Path template
 
-The template expands against the repository being acted on. A relative result resolves against the repository root.
+The template expands against the repository being acted on. A relative result resolves against `{repoRoot}`.
 
 | Placeholder | Expands to |
 | --- | --- |
-| `{repoRoot}` | the repository's main worktree directory |
-| `{repoParent}` | its parent directory |
-| `{repo}` | its basename |
-| `{branch}` | the branch name with `/` folded to `-`, so `feature/login` stays one directory |
-| `{branchPath}` | the branch name with its slashes kept, so `feature/login` nests |
+| `{repoRoot}` | The repository's main worktree directory. |
+| `{repoParent}` | Its parent directory. |
+| `{repo}` | Its directory name. |
+| `{branch}` | The branch name with `/` replaced by `-`, so `feature/login` becomes one directory. |
+| `{branchPath}` | The branch name with slashes kept, so `feature/login` nests. |
 
-The template must contain `{branch}` or `{branchPath}`; without one, every worktree would expand to the same directory and only the first could be created. The plugin refuses such a template at load and the settings card refuses to store it.
+## RPC and model-facing surface
 
-## Design notes
+The plugin registers **no model tools**, prompt content, or session events. The browser half calls one Typert Remote namespace, `worktree`, over the harness's own client connection:
 
-**git runs on the host, never in the browser.** Reading a repository means running `git` and parsing its machine formats, and creating a worktree means writing a directory — neither is reachable from a page. What crosses the wire is already classified: parsed readings, and mutation outcomes carrying git's own summary line.
+| Endpoint | Purpose |
+| --- | --- |
+| `describe` | Whether git is available, its version, and the preferences the browser draws from. |
+| `overview` | HEAD, dirty counts, branches, and worktrees for one workspace directory. |
+| `searchBranches` | Case-insensitive branch-name search past `maxBranches`. |
+| `fetch` | `git fetch --all --prune --quiet`. |
+| `checkout`, `createBranch`, `renameBranch`, `deleteBranch` | Branch changes. |
+| `suggestBranchName` | Branch name from a prompt, written by the model or as a slug. |
+| `suggestPath`, `addWorktree`, `inspectWorktree`, `removeWorktree`, `lockWorktree`, `pruneWorktrees` | Worktree changes. |
 
-**A value from the browser becomes a git argument only after the host has proved what it names** — a branch through the shared name rules and `rev-parse --verify`, a worktree path by matching git's own `worktree list`. The one path that skips that check, a new worktree's destination, must be absent or an empty directory. A name beginning with `-` is refused on both halves, as `git check-ref-format --branch` refuses it: in an argument list `-f` or `-D` is an option, and renaming a branch to `-f` would otherwise force-rename the current branch over another. Where git's parser allows it (`git branch`, `git worktree`), `--` also ends the options before those values.
+Every endpoint returns a result value with a failure code (`no-git`, `not-a-repository`, `refused`, `timeout`, …) instead of throwing. The root export `@achasoft/dsh-worktree` re-exports these types for other packages.
 
-**Opening a folder runs nothing the folder configures.** The row reads a repository as soon as a folder is selected and again on every poll, so every git invocation runs with `core.fsmonitor=false`, and the background `status` additionally switches off every filter driver the repository's local or per-worktree config defines (git runs a clean filter to compare a file whose timestamp changed), takes no optional locks, and does not descend into submodules' working trees (`--ignore-submodules=dirty`, since a submodule's own status would read its own config). Filters configured globally — git-lfs, for instance — are yours and keep working. A repository whose filter driver name cannot be expressed on git's command line is not read automatically at all.
+## Security notes
 
-**Nothing here is model-facing.** Which branch you are on is operator context that never enters a prompt, so the plugin adds no tool, no prompt contribution, and no session event. The agent reaches git the way it always has: through the shell. The one model call this plugin makes is its own — naming a worktree's branch — and its answer reaches git as a branch name, never as prompt text.
+- **git runs only on the host**, through `ctx.subprocess`, with `GIT_TERMINAL_PROMPT=0`, `GIT_PAGER=cat`, and `LC_ALL=C`. The plugin registers no HTTP routes. All calls go through the harness's own client connection.
+- **Opening a folder runs nothing the folder configures.**
+  - Every invocation passes `-c core.fsmonitor=false`.
+  - Background readings (the status poll) also switch off every `filter.<driver>.clean`/`process` defined in the repository's local or per-worktree config, including `include.path` files. They also pass `--no-optional-locks` and `--ignore-submodules=dirty`.
+  - Filters from your global or system config, such as git-lfs, keep working.
+  - A repository whose filter driver name contains `=` cannot have that filter disabled on the command line, so it is not read automatically.
+- **Browser input is checked before it reaches git.**
+  - Branch names must pass git's ref-name rules, and a leading `-` is refused.
+  - Start points are verified with `rev-parse --verify`.
+  - Worktree paths must appear in git's own `worktree list`.
+  - `--` ends the options wherever git's parser accepts it.
+  - A new worktree's destination must be absent or an empty directory.
+- **No uncommitted work is thrown away without a prompt.** Checkouts never use `--force`. Force-delete and force-remove are separate, confirmed actions. Ignored files need an explicit acknowledgement that the host enforces.
+- **Cleanup deletes only a branch that holds no work.** When a first send is abandoned, the new branch is deleted only while its tip is still the commit it was created at. The host checks this with `expectedTip`.
 
-**The new-session seat is taken by shadowing, not by forking the shell.** `ui-workspace` registers `conversation.hero.workspace` at the default slot priority and this plugin registers the same single seat at `-1`, which is the slot system's documented shadowing rule: the lowest live entry renders. The shell's folder chip, its draft-carrying workspace switch, and the core mode chip all keep working. The mode chip is rendered by the shell after this seat; every slot wrapper is `display: contents`, so the branch pill takes a CSS `order` that places it after the mode chip.
+## Known limitations
 
-**The session's control sits above the composer, not in the header.** It takes `conversation.input.dock`, the harness's full-width row stacked above the composer card, at an `order` after the core todo and queue entries so it is the row touching the card. That is where the new-session pill sat before the first prompt, so the control does not move when the session starts, and it stays next to the prompt it qualifies. The shell also renders the dock on the blank new-session screen, so the row mirrors the shell's own phase rule and draws nothing until the session has left it. Its popovers open upward and are capped at the room above the row.
-
-**The worktree is made on the first send, because the harness offers no hook before one.** Input triggers only adjudicate drafts that start with `/`, and a command claim cannot be released once taken, so a small seat inside the composer card listens for Enter and the send button in the capture phase — and only while a worktree is staged, no trigger menu owns Enter, nothing is composing, and the harness's own send button is enabled. It locks the composer, names and creates the worktree, adopts it as a Workspace, and moves there through the same workspace switch a manual pick uses, which carries the draft and its attachments; the seat in the worktree's session then sends the carried draft with the composer's own submit. It confirms the session is still on screen before anything lasting and again before moving, and if the move does not land in time it removes the Workspace, worktree and branch again and restores the checkbox: nothing sent means nothing left behind. The branch is deleted only while it still points at the commit it was created at — which proves it holds no work, even when its base is not merged into the project's HEAD and a plain `git branch -d` would refuse.
-
-**Remote branches are never deleted.** Deleting one means pushing a deletion to somebody else's repository, which is not something a switcher popover should be able to do by accident.
-
-**The settings card shows a change the host refused.** The bound settings scope resolves even when the host rejects a write, so each write is checked against the stored value afterwards and a refusal is shown at the top of the card; the two dependent switches are written dependent-first, as one mutation where the harness supports it.
-
-**Removing a worktree leaves its Workspace registered.** The removal dialog promises to delete a directory and keep the branch; silently un-registering a Workspace you may have created yourself is a different domain's business. Remove it from the sidebar when you want it gone.
+- **The first send is intercepted in the composer.** The harness has no pre-send hook for a plain prompt, because input triggers only handle drafts that start with `/`. A hidden element in the composer's tool row (`conversation.input.left`) listens, in the capture phase, for Enter and for clicks on the send button. It acts only while a worktree is ticked, the draft does not start with `/`, no trigger menu owns Enter, no IME composition is in progress, and the send button is enabled. A future change to the composer's DOM, such as the send button no longer being the card's last button, would need this updated.
+- **The worktree is created on the first message, not when you tick the box**, because its branch is named from that message.
+- **The project folder's branch switch is refused on a dirty tree.** The new-session pill never carries changes. Use the row's **Carry uncommitted changes** switch in a running session, or commit first.
+- **Folders that are not repositories** show a disabled **no git** pill on the new-session screen, and no row in a running session.
+- **Shadowed seat.** The new-session toolbar replaces the harness's workspace picker by registering `conversation.hero.workspace` at priority `-1`. The lowest priority renders, and the core picker is at `0`. The core menu's **Add workspace…** entry is replaced by **Browse for folder…**. Uninstalling returns the core picker.
+- **The row mirrors the shell's session phase.** The composer dock is also drawn on the blank screen, so the row reproduces the conversation shell's phase rule (checked against `@deepseek-ai/dsh-client-ui-conversation` 0.1.5-rc.2) to decide when to show.
+- **Branch names from a model use a model call** (up to 32 output tokens, 20 s timeout) against the deployment's provider for each worktree created on first send.
 
 ## Development
 
-```sh
+The dev dependencies are `link:` specifiers to a DeepSeek Harness source checkout at `../../deepseek-harness`, relative to this directory. Clone the harness there before installing.
+
+```bash
 pnpm install
 pnpm run typecheck
-pnpm test          # checks the generated Typert contract, then runs the unit tests
-pnpm run build
+pnpm test              # checks generated/ against src/host, then runs vitest
+pnpm run build         # tsc -p tsconfig.build.json, then tsdown -> lib/
 ```
 
-`generated/` holds the Typert RPC contract and is **committed source**, not a build output this package can reproduce: the harness's generator only runs inside a `deepseek-harness` checkout. It is authored to that generator's format by `scripts/emit-typert.mjs`, and `pnpm test` refuses a mismatch — so editing `src/host/types.ts` or the `@Remote` surface means editing that spec and re-running `pnpm run regen:typert`.
+`generated/` holds the Typert RPC contract and is committed source. The harness's generator only runs inside a harness checkout, so `scripts/emit-typert.mjs` writes the contract in that generator's format. If you change `src/host/types.ts` or the `@Remote` methods in `src/host/index.ts`, update the spec in that script and regenerate:
+
+```bash
+pnpm run regen:typert  # rewrites generated/ and generated/.fingerprint
+pnpm run check:typert  # the same check pnpm test runs first
+```
+
+To load your checkout into a local profile, build it, then add it by path. dsh resolves a relative path against the directory you run it from:
+
+```bash
+pnpm run build
+dsh plugin --profile web add "$(pwd)"
+dsh web
+```
+
+The profile loads the built `lib/` output, not `src/`, so build before adding the checkout. After changing browser code, rebuild and reload the page. After changing anything under `src/host/`, or regenerating `generated/`, restart `dsh web`.
 
 ## License
 

@@ -4,7 +4,7 @@
  * tokens, because the section's components cannot be imported across the plugin boundary. Any change
  * to `PluginCard.module.css` or `fields.module.css` upstream is a change this file should follow.
  *
- * The one departure is the group heading: thirteen settings in one flat column reads as a wall, so
+ * The one departure is the group heading: eleven settings in one flat column reads as a wall, so
  * they are banded into five named groups that each answer one question. */
 
 .card {
