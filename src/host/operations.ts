@@ -2,11 +2,15 @@
  * Every reading and mutation the `worktree` namespace publishes, expressed as git invocations over
  * {@link GitClient} and the parsers in `./parse.ts`.
  *
- * Two rules hold across the file. A value from the browser becomes a git argument only after this
- * layer has proved what it names — a branch through `rev-parse --verify`, a worktree path through
- * git's own listing — so a request cannot smuggle an option or a pathspec into an argument list.
- * And nothing here throws for a business outcome: a dirty checkout, an unmerged delete, and a locked
- * worktree are returned as classified failures, because the browser's next move differs for each.
+ * Three rules hold across the file. A value from the browser becomes a git argument only after this
+ * layer has proved what it names — a branch through the shared name rules (which refuse a leading
+ * `-`) and `rev-parse --verify`, a worktree path through git's own listing — so a request cannot
+ * smuggle an option or a pathspec into an argument list; where git's parser allows it, `--` also ends
+ * the options before those values, so a later edit that forgets the proof still cannot turn one into
+ * an option. A reading taken without anyone asking for it — the chip's poll — runs no program the
+ * repository's configuration names (see {@link WorktreeOperations.readingOptions}). And nothing here
+ * throws for a business outcome: a dirty checkout, an unmerged delete, and a locked worktree are
+ * returned as classified failures, because the browser's next move differs for each.
  * @module @achasoft/dsh-worktree/host/operations
  */
 
@@ -17,15 +21,17 @@ import {
 import { checkBranchName, localBranchOf } from '../shared/branch-name.ts'
 import { classify, fail, type GitClient } from './git.ts'
 import {
-  BRANCH_FORMAT, branchWorktreeIndex, parseBranches, parseStatus, parseWorktrees,
+  BRANCH_FORMAT, READING_CONFIG_KEYS, branchWorktreeIndex, countBranchRecords, parseBranches,
+  parseContents, parseFilterDrivers, parseStatus, parseWorktrees, worktreeConfigEnabled,
 } from './parse.ts'
 import { isEmptyDirectory, resolveDirectory, resolvePath, type ResolvedPath } from './paths.ts'
 import type { CommandOutcome } from './run.ts'
 import type {
   AddWorktreeRequest, AddWorktreeResult, BranchEntry, CheckoutRequest, CreateBranchRequest,
-  DeleteBranchRequest, GitFailure, LockWorktreeRequest, MutationResult, OverviewResult,
-  RemoveWorktreeRequest, RenameBranchRequest, RepoRequest, SuggestPathRequest, SuggestPathResult,
-  WorktreeEntry, WorktreeSettings,
+  DeleteBranchRequest, GitFailure, InspectWorktreeRequest, InspectWorktreeResult,
+  LockWorktreeRequest, MutationResult, OverviewResult, RemoveWorktreeRequest, RenameBranchRequest,
+  RepoRequest, SearchBranchesRequest, SearchBranchesResult, SuggestPathRequest, SuggestPathResult,
+  WorktreeContents, WorktreeEntry, WorktreeSettings,
 } from './types.ts'
 
 /** What every endpoint resolves before touching a repository. */
@@ -40,6 +46,25 @@ interface Repository {
 
 /** A resolved repository, or the failure to answer with instead. */
 type RepositoryOutcome = { readonly ok: true; readonly value: Repository } | { readonly ok: false; readonly failure: GitFailure }
+
+/** A bounded branch listing, or the failure to answer with instead. */
+type BranchListing = { readonly ok: true; readonly branches: BranchEntry[]; readonly truncated: boolean } | GitFailure
+
+/** Arguments placed ahead of a reading's subcommand, or the failure to answer with instead. */
+type ReadingOptions = { readonly ok: true; readonly argv: readonly string[] } | GitFailure
+
+/**
+ * A full object name: SHA-1 or SHA-256 hex. The only spelling {@link DeleteBranchRequest.expectedTip}
+ * accepts, because comparing against anything git would still have to resolve — a branch name, an
+ * abbreviation — would compare against whatever it resolves to at that moment.
+ */
+const OBJECT_NAME = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u
+
+/** Characters git forbids in every ref name, and that `for-each-ref` would read as a glob. */
+const GLOB_CHARACTERS = /[*?[\\]/u
+
+/** `git config --get-regexp` found nothing: its documented "no match" exit, not a failure. */
+const CONFIG_NO_MATCH = 1
 
 /**
  * git's own one-line account of what a successful command did.
@@ -102,9 +127,19 @@ export class WorktreeOperations {
     const { requested, worktreeRoot, worktrees } = prepared.value
     const settings = this.source()
 
+    const options = await this.readingOptions(requested.processPath, signal)
+    if (!options.ok) return options
     const status = await this.git.run(
       requested.processPath,
-      ['status', '--porcelain=v2', '--branch', '--untracked-files=normal', '-z'],
+      [
+        ...options.argv,
+        'status', '--porcelain=v2', '--branch', '--untracked-files=normal',
+        // `dirty` rather than the default: counting changes INSIDE a submodule means git spawns a
+        // status in it, and that child reads the submodule's own config — filter drivers this layer
+        // never saw. A submodule whose recorded commit moved is still reported.
+        '--ignore-submodules=dirty',
+        '-z',
+      ],
       {},
       signal,
     )
@@ -112,24 +147,8 @@ export class WorktreeOperations {
     const reading = parseStatus(status.stdout)
 
     const refs = settings.includeRemoteBranches ? ['refs/heads', 'refs/remotes'] : ['refs/heads']
-    const branchOutcome = await this.git.run(
-      requested.processPath,
-      [
-        'for-each-ref',
-        `--format=${BRANCH_FORMAT}`,
-        '--sort=-committerdate',
-        // One more than the ceiling, so the reading can say it truncated instead of silently
-        // handing back a list that happens to stop at a round number.
-        `--count=${String(settings.maxBranches + 1)}`,
-        ...refs,
-      ],
-      {},
-      signal,
-    )
-    if (branchOutcome.exitCode !== 0) return classify(branchOutcome)
-    const parsed = parseBranches(branchOutcome.stdout, branchWorktreeIndex(worktrees))
-    const branchesTruncated = parsed.length > settings.maxBranches
-    const branches = branchesTruncated ? parsed.slice(0, settings.maxBranches) : parsed
+    const listing = await this.listBranches(requested.processPath, worktrees, refs, [], signal)
+    if (!listing.ok) return listing
 
     const main = worktrees[0]
     return {
@@ -146,11 +165,42 @@ export class WorktreeOperations {
         dirty: reading.dirty,
         linked: main !== undefined && main.path !== worktreeRoot,
       },
-      branches: this.orderBranches(branches),
-      branchesTruncated,
+      branches: this.orderBranches(listing.branches),
+      branchesTruncated: listing.truncated,
       worktrees,
       readAt: Date.now(),
     }
+  }
+
+  /**
+   * Find branches whose short name contains some text, beyond the ceiling an overview is cut at.
+   *
+   * The switcher filters the reading it holds, and that reading stops at
+   * {@link WorktreeSettings.maxBranches} — so on a repository with more branches than that, typing a
+   * name that exists would otherwise find nothing, and offer to create it.
+   * @param request - the repository and the text to search for.
+   * @param signal - cancellation for the listing.
+   * @returns the matching branches, or a classified failure.
+   */
+  async searchBranches(request: SearchBranchesRequest, signal?: AbortSignal): Promise<SearchBranchesResult> {
+    const query = request.query.trim()
+    if (query === '') return fail('invalid-request', 'a branch search needs some text to search for')
+    const prepared = await this.prepare(request, signal)
+    if (!prepared.ok) return prepared.failure
+    // No ref name can contain these, so nothing can match — and passing them on would make the query
+    // a glob that matches far more than the text typed.
+    if (GLOB_CHARACTERS.test(query)) return { ok: true, branches: [], truncated: false }
+    const roots = this.source().includeRemoteBranches ? ['refs/heads/', 'refs/remotes/'] : ['refs/heads/']
+    // `for-each-ref` matches patterns with path semantics — `*` stops at `/` — so a substring needs
+    // two: `**/*q*` for a match in the last component, `**/*q*/**` for one with components after
+    // it (`**/` also matches no directory at all). git prints a ref matching both once. For a remote
+    // the remote's own name is part of the text searched, as it is part of the name the switcher shows.
+    const patterns = roots.flatMap(root => [`${root}**/*${query}*`, `${root}**/*${query}*/**`])
+    const listing = await this.listBranches(
+      prepared.value.requested.processPath, prepared.value.worktrees, patterns, ['--ignore-case'], signal,
+    )
+    if (!listing.ok) return listing
+    return { ok: true, branches: this.orderBranches(listing.branches), truncated: listing.truncated }
   }
 
   /**
@@ -236,9 +286,11 @@ export class WorktreeOperations {
     const start = await this.resolveStartPoint(cwd, request.startPoint, signal)
     if (start !== undefined && 'ok' in start) return start
 
+    // `--` for `git branch`, whose parser ends its options there on every release; not for `switch`,
+    // whose handling of `--` has varied, so its values rest on the proofs above alone.
     const argv = request.checkout
       ? ['switch', '--create', request.branch, ...start === undefined ? [] : [start.value]]
-      : ['branch', request.branch, ...start === undefined ? [] : [start.value]]
+      : ['branch', '--', request.branch, ...start === undefined ? [] : [start.value]]
     return settle(await this.git.run(cwd, argv, {}, signal))
   }
 
@@ -264,8 +316,22 @@ export class WorktreeOperations {
     if (holder !== undefined) {
       return fail('refused', `"${request.branch}" is checked out at ${holder}; switch or remove that worktree first`)
     }
-    const argv = ['branch', request.force ? '-D' : '-d', request.branch]
-    return settle(await this.git.run(cwd, argv, {}, signal))
+    if (request.expectedTip === undefined) {
+      const argv = ['branch', request.force ? '-D' : '-d', '--', request.branch]
+      return settle(await this.git.run(cwd, argv, {}, signal))
+    }
+    if (!OBJECT_NAME.test(request.expectedTip)) {
+      return fail('invalid-request', `"${request.expectedTip}" is not a full commit object name`)
+    }
+    const tip = await this.commitOf(cwd, `refs/heads/${request.branch}`, signal)
+    if (tip !== request.expectedTip) {
+      return fail('refused', `"${request.branch}" no longer points at ${request.expectedTip.slice(0, 7)}, so it may hold work; it was not deleted`)
+    }
+    // Forced, because the tip being the commit the branch was created at is the proof `-d` looks for
+    // in a merge: no commit is reachable only from this branch. The check and the delete are two
+    // commands, and the window between them is accepted: the branch is checked out nowhere (refused
+    // above), so nothing is in a position to commit to it in between.
+    return settle(await this.git.run(cwd, ['branch', '-D', '--', request.branch], {}, signal))
   }
 
   /**
@@ -290,7 +356,7 @@ export class WorktreeOperations {
     }
     // `-m`, never `-M`: a rename onto an existing name is refused above, and forcing here would let
     // a race between the check and the command discard the other branch.
-    const argv = ['branch', '-m', request.branch, request.name]
+    const argv = ['branch', '-m', '--', request.branch, request.name]
     return settle(await this.git.run(cwd, argv, {}, signal))
   }
 
@@ -346,9 +412,9 @@ export class WorktreeOperations {
     }
 
     // Three mutually exclusive forms, each with its own precondition and its own argument order:
-    //   detach          `worktree add --detach <path> <commit-ish>`
-    //   create branch   `worktree add -b <new> <path> [<start-point>]`
-    //   existing branch `worktree add <path> <branch>`
+    //   detach          `worktree add --detach -- <path> <commit-ish>`
+    //   create branch   `worktree add -b <new> -- <path> [<start-point>]`
+    //   existing branch `worktree add -- <path> <branch>`
     const argv = ['worktree', 'add']
     if (request.detach) {
       // The commit-ish is proved rather than name-checked: a detached worktree may sit on a tag, a
@@ -356,14 +422,14 @@ export class WorktreeOperations {
       const start = await this.resolveStartPoint(cwd, request.startPoint ?? request.branch, signal)
       if (start === undefined) return fail('invalid-request', 'a detached worktree needs a commit to check out')
       if ('ok' in start) return start
-      argv.push('--detach', target.value.processPath, start.value)
+      argv.push('--detach', '--', target.value.processPath, start.value)
     } else if (request.createBranch) {
       if (await this.hasRef(cwd, `refs/heads/${request.branch}`, signal)) {
         return fail('refused', `a branch named "${request.branch}" already exists`)
       }
       const start = await this.resolveStartPoint(cwd, request.startPoint, signal)
       if (start !== undefined && 'ok' in start) return start
-      argv.push('-b', request.branch, target.value.processPath)
+      argv.push('-b', request.branch, '--', target.value.processPath)
       if (start !== undefined) argv.push(start.value)
     } else {
       if (!await this.hasRef(cwd, `refs/heads/${request.branch}`, signal)) {
@@ -373,7 +439,7 @@ export class WorktreeOperations {
       if (holder !== undefined) {
         return fail('refused', `"${request.branch}" is already checked out at ${holder}`)
       }
-      argv.push(target.value.processPath, request.branch)
+      argv.push('--', target.value.processPath, request.branch)
     }
 
     const outcome = await this.git.run(cwd, argv, {}, signal)
@@ -381,17 +447,41 @@ export class WorktreeOperations {
     // Re-resolved after the fact: git canonicalizes the destination itself, and the path it settled
     // on is what a workspace must be registered under for the two to refer to one directory.
     const created = await resolvePath(this.ctx, target.value.processPath, signal)
+    const path = created.ok ? created.value.processPath : target.value.processPath
+    // Read back rather than taken from the start point: a start point is whatever the request named,
+    // and the commit git actually checked out is what a caller undoing this creation must compare with.
+    const sha = await this.commitOf(path, 'HEAD', signal)
     return {
       ok: true,
-      path: created.ok ? created.value.processPath : target.value.processPath,
+      path,
       ...request.detach ? {} : { branch: request.branch },
+      ...sha === undefined ? {} : { sha },
       detail: summarize(outcome),
     }
   }
 
   /**
+   * Report what removing a worktree would delete that no commit keeps.
+   * @param request - the repository and the worktree path.
+   * @param signal - cancellation for the reading.
+   * @returns the counts and the first ignored entries, or a classified failure.
+   */
+  async inspectWorktree(request: InspectWorktreeRequest, signal?: AbortSignal): Promise<InspectWorktreeResult> {
+    const prepared = await this.prepare(request, signal)
+    if (!prepared.ok) return prepared.failure
+    const entry = this.findWorktree(prepared.value, request.path)
+    if (entry === undefined) {
+      return fail('not-found', `${request.path} is not a worktree of this repository`)
+    }
+    const directory = await resolveDirectory(this.ctx, entry.path, signal)
+    if (!directory.ok) return directory.failure
+    return this.readContents(directory.value.processPath, signal)
+  }
+
+  /**
    * Remove a worktree.
-   * @param request - the worktree path, and whether to remove one with uncommitted work.
+   * @param request - the worktree path, whether to remove one with uncommitted work, and whether its
+   * ignored files may go with it.
    * @param signal - cancellation for the command.
    * @returns git's summary, or a classified failure.
    */
@@ -405,7 +495,16 @@ export class WorktreeOperations {
     if (entry.main) {
       return fail('refused', 'the main worktree holds the repository and cannot be removed')
     }
-    const argv = ['worktree', 'remove', ...request.force ? ['--force'] : [], entry.path]
+    // Removing the worktree a request is working in deletes the directory the session itself runs
+    // in, out from under it; that is done from another workspace or not at all.
+    if (entry.path === prepared.value.worktreeRoot) {
+      return fail('refused', `${entry.path} is the worktree this workspace is in; remove it from another workspace`)
+    }
+    if (request.discardIgnored !== true) {
+      const ignored = await this.refuseIgnoredLoss(entry.path, request.force, signal)
+      if (ignored !== undefined) return ignored
+    }
+    const argv = ['worktree', 'remove', ...request.force ? ['--force'] : [], '--', entry.path]
     return settle(await this.git.run(prepared.value.requested.processPath, argv, {}, signal))
   }
 
@@ -427,8 +526,8 @@ export class WorktreeOperations {
     }
     const reason = request.reason?.trim() ?? ''
     const argv = request.locked
-      ? ['worktree', 'lock', ...reason === '' ? [] : ['--reason', reason], entry.path]
-      : ['worktree', 'unlock', entry.path]
+      ? ['worktree', 'lock', ...reason === '' ? [] : ['--reason', reason], '--', entry.path]
+      : ['worktree', 'unlock', '--', entry.path]
     return settle(await this.git.run(prepared.value.requested.processPath, argv, {}, signal))
   }
 
@@ -488,6 +587,170 @@ export class WorktreeOperations {
         worktrees: parseWorktrees(listing.stdout, nul ? '\0' : '\n', worktreeRoot),
       },
     }
+  }
+
+  /**
+   * The options that keep a reading from running a program the repository's config names.
+   *
+   * Three things, each because the chip reads a folder as soon as it is selected and on every poll,
+   * so a folder someone merely opened must not be able to execute anything:
+   *
+   * - `core.fsmonitor=false` — carried by every invocation; see `INVOCATION_CONFIG` in `./git.ts`.
+   * - Every filter driver the repository's own config defines gets an empty `clean` and `process`.
+   *   git re-reads a file whose stat information changed but whose size did not, and runs it through
+   *   its clean filter to compare — so a `.gitattributes` line plus `filter.x.clean` in `.git/config`
+   *   is a program a plain `git status` executes. Only the local and worktree scopes are neutralised:
+   *   those are the files a folder brings with it, while a filter configured globally (git-lfs, say)
+   *   is the operator's own and keeps working. An empty command is git's own "no filter".
+   * - `--no-optional-locks`, so a background reading never takes `index.lock` or rewrites the index
+   *   while the agent is running git in the same worktree. `core.untrackedCache` is still honoured —
+   *   it is a cache, not a program — but a reading never persists an update to it.
+   *
+   * Hooks need nothing: no reading here runs one.
+   * @param cwd - the directory the reading will run in.
+   * @param signal - cancellation for the config queries.
+   * @returns the arguments to place before the subcommand, or the failure to answer with.
+   */
+  private async readingOptions(cwd: string, signal?: AbortSignal): Promise<ReadingOptions> {
+    const local = await this.filterDrivers(cwd, '--local', signal)
+    if (!local.ok) return local
+    // Per-worktree config is a second file the folder brings with it, but `--worktree` is an error in
+    // a repository with linked worktrees unless the extension is on — so it is asked for only then.
+    // Without the extension git reads no such file, and `--local` has already covered everything.
+    const worktree = local.worktreeConfig ? await this.filterDrivers(cwd, '--worktree', signal) : undefined
+    if (worktree !== undefined && !worktree.ok) return worktree
+    const names = new Set([...local.names, ...worktree?.names ?? []])
+    const argv = ['--no-optional-locks']
+    for (const name of names) {
+      // `-c` splits its argument at the first `=`, so a driver name holding one cannot be addressed
+      // and its filter could not be switched off. Refusing the reading is the only safe answer.
+      if (name.includes('=')) {
+        return fail('refused', `the repository configures a filter driver named "${name}" that cannot be disabled for a background reading, so it is not read automatically`)
+      }
+      argv.push('-c', `filter.${name}.clean=`, '-c', `filter.${name}.process=`)
+    }
+    return { ok: true, argv }
+  }
+
+  /**
+   * Read the filter drivers one config scope defines, and whether per-worktree config is enabled.
+   * @param cwd - the directory the reading will run in.
+   * @param scope - `--local` or `--worktree`.
+   * @param signal - cancellation for the query.
+   * @returns the driver names and the extension flag, or a classified failure.
+   */
+  private async filterDrivers(
+    cwd: string, scope: '--local' | '--worktree', signal?: AbortSignal,
+  ): Promise<{ readonly ok: true; readonly names: readonly string[]; readonly worktreeConfig: boolean } | GitFailure> {
+    // `--includes` because a file-scoped query does not follow `include.path` by default, and an
+    // included file is as much the folder's as `.git/config` itself.
+    const outcome = await this.git.run(
+      cwd, ['config', '--null', scope, '--includes', '--get-regexp', READING_CONFIG_KEYS], {}, signal,
+    )
+    const empty = outcome.exitCode === CONFIG_NO_MATCH && !outcome.timedOut && !outcome.aborted
+    if (!empty && outcome.exitCode !== 0) return classify(outcome)
+    const names = empty ? [] : parseFilterDrivers(outcome.stdout)
+    const worktreeConfig = empty ? false : worktreeConfigEnabled(outcome.stdout)
+    return { ok: true, names, worktreeConfig }
+  }
+
+  /**
+   * Read a bounded, ordered branch listing, and whether the ceiling cut it.
+   *
+   * `--count` bounds what git prints, symbolic refs included, and those are dropped afterwards — so
+   * a listing asked for one more than the ceiling can come back with exactly the ceiling after
+   * `origin/HEAD` is dropped, and read as complete when it is not. The count is therefore widened by
+   * however many records were dropped until either the ceiling is exceeded or git printed fewer
+   * records than asked for, which is the only proof the listing is complete. Each round adds at least
+   * one record and a repository holds few symbolic refs, so this is one query in practice.
+   * @param cwd - directory to run in.
+   * @param worktrees - the repository's worktrees, for each branch's `checkedOutAt`.
+   * @param patterns - `for-each-ref` patterns.
+   * @param flags - extra `for-each-ref` options.
+   * @param signal - cancellation for the listing.
+   * @returns at most {@link WorktreeSettings.maxBranches} branches, or a classified failure.
+   */
+  private async listBranches(
+    cwd: string,
+    worktrees: readonly WorktreeEntry[],
+    patterns: readonly string[],
+    flags: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<BranchListing> {
+    const ceiling = this.source().maxBranches
+    const index = branchWorktreeIndex(worktrees)
+    let count = ceiling + 1
+    for (;;) {
+      const outcome = await this.git.run(
+        cwd,
+        ['for-each-ref', `--format=${BRANCH_FORMAT}`, '--sort=-committerdate', `--count=${String(count)}`, ...flags, ...patterns],
+        {},
+        signal,
+      )
+      if (outcome.exitCode !== 0) return classify(outcome)
+      const parsed = parseBranches(outcome.stdout, index)
+      const records = countBranchRecords(outcome.stdout)
+      if (parsed.length > ceiling || records < count) {
+        return { ok: true, branches: parsed.slice(0, ceiling), truncated: parsed.length > ceiling }
+      }
+      count += records - parsed.length
+    }
+  }
+
+  /**
+   * Read what a worktree holds beyond its commits, under the same guards as the chip's reading.
+   * @param cwd - the worktree directory.
+   * @param signal - cancellation for the reading.
+   * @returns the contents, or a classified failure.
+   */
+  private async readContents(cwd: string, signal?: AbortSignal): Promise<WorktreeContents | GitFailure> {
+    const options = await this.readingOptions(cwd, signal)
+    if (!options.ok) return options
+    const outcome = await this.git.run(
+      cwd,
+      [
+        ...options.argv,
+        // `--ignored` in its traditional form reports a wholly ignored directory once, as `build/`,
+        // which is what a confirmation can name without listing a dependency tree file by file.
+        'status', '--porcelain=v2', '--untracked-files=normal', '--ignored', '--ignore-submodules=dirty', '-z',
+      ],
+      {},
+      signal,
+    )
+    if (outcome.exitCode !== 0) return classify(outcome)
+    return { ok: true, ...parseContents(outcome.stdout) }
+  }
+
+  /**
+   * Refuse a removal that would delete ignored files nobody was shown.
+   * @param path - the worktree directory as git lists it.
+   * @param force - whether the removal is forced; a forced removal of an unreadable worktree proceeds.
+   * @param signal - cancellation for the reading.
+   * @returns the failure to answer with, or undefined when the removal may go ahead.
+   */
+  private async refuseIgnoredLoss(path: string, force: boolean, signal?: AbortSignal): Promise<GitFailure | undefined> {
+    const directory = await resolvePath(this.ctx, path, signal)
+    // A worktree whose directory is already gone has nothing left to lose; git drops its record.
+    if (!directory.ok || !directory.value.directory) return undefined
+    const contents = await this.readContents(directory.value.processPath, signal)
+    if (!contents.ok) return force ? undefined : contents
+    if (contents.ignored === 0) return undefined
+    const sample = contents.ignoredPaths.slice(0, 3).join(', ')
+    const more = contents.ignored > 3 ? ', …' : ''
+    return fail('refused', `removing ${path} would delete ${String(contents.ignored)} ignored ${contents.ignored === 1 ? 'entry' : 'entries'} (${sample}${more}); confirm deleting them to remove it`)
+  }
+
+  /**
+   * Read the commit a revision points at.
+   * @param cwd - directory to run in.
+   * @param revision - a full ref (`refs/heads/x`) or `HEAD`; never browser text.
+   * @param signal - cancellation for the invocation.
+   * @returns the full object name, or undefined when it does not resolve.
+   */
+  private async commitOf(cwd: string, revision: string, signal?: AbortSignal): Promise<string | undefined> {
+    const outcome = await this.git.run(cwd, ['rev-parse', '--verify', '--quiet', `${revision}^{commit}`], {}, signal)
+    if (outcome.exitCode !== 0) return undefined
+    return outcome.stdout.trim()
   }
 
   /**

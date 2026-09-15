@@ -45,7 +45,8 @@
         includeRemoteBranches: true
         # Enough for any repository someone browses by name, and a ceiling that
         # keeps one reading bounded on a repository with thousands of refs. The
-        # list says so when it truncated; the search box reaches the rest.
+        # list says so when it truncated, and typing in a branch search then asks
+        # the host as well, so a branch past the ceiling is still found.
         maxBranches: 200
 
         # How often the row above the composer re-reads. git status on a warm repository
@@ -64,8 +65,12 @@
         graceMs: 5000
 
         # Requires typing the branch or worktree name before a force-delete or a
-        # force-remove. The unforced forms are never gated: git refuses those
-        # itself when they would lose anything.
+        # force-remove. The unforced forms are not typed-gated: git refuses an
+        # unmerged branch delete, and a worktree removal over modified or
+        # untracked files. It does NOT refuse over IGNORED files (a .env, a local
+        # build) — it deletes them — so removing a worktree that holds any lists
+        # them and needs an explicit tick first, whatever this is set to, and the
+        # host refuses the removal without that acknowledgement.
         confirmDestructive: true
 
     # The BARE package name, deliberately: the Web Client discovers a browser half

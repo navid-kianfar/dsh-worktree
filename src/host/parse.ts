@@ -1,6 +1,7 @@
 /**
- * Parsers for the three machine formats this plugin reads: `git status --porcelain=v2 --branch`,
- * `git worktree list --porcelain`, and one fixed `git for-each-ref --format`.
+ * Parsers for the machine formats this plugin reads: `git status --porcelain=v2` (with `--branch`
+ * for the chip, with `--ignored` before a removal), `git worktree list --porcelain`, one fixed
+ * `git for-each-ref --format`, and the filter-driver keys of `git config --null --get-regexp`.
  *
  * Pure functions over already-captured text, with no context and no I/O, so every format quirk is
  * covered by a unit test rather than by a live repository.
@@ -56,6 +57,33 @@ export function parseTracking(upstream: string, track: string): TrackingState | 
 }
 
 /**
+ * Split `for-each-ref` output into its non-empty records.
+ * @param stdout - output written with {@link BRANCH_FORMAT}.
+ * @returns each record's text, without its terminator.
+ */
+function branchRecords(stdout: string): string[] {
+  return stdout
+    .split(RECORD_SEPARATOR)
+    // git writes a newline after each record's terminator, so every record but the first arrives
+    // with it still attached; the last split part is the trailing newline alone.
+    .map(record => record.replace(/^\r?\n/u, ''))
+    .filter(record => record !== '')
+}
+
+/**
+ * Count the records git printed, symbolic refs included.
+ *
+ * `--count` limits what git PRINTS, and {@link parseBranches} then drops the symbolic refs among
+ * them — so whether a listing reached its count is a question about this number, not about how many
+ * branches came out of it.
+ * @param stdout - output written with {@link BRANCH_FORMAT}.
+ * @returns the number of records.
+ */
+export function countBranchRecords(stdout: string): number {
+  return branchRecords(stdout).length
+}
+
+/**
  * Parse `git for-each-ref` output written with {@link BRANCH_FORMAT}.
  *
  * Symbolic refs are dropped: `refs/remotes/origin/HEAD` is a pointer at another row in the same
@@ -68,12 +96,8 @@ export function parseBranches(
   stdout: string, checkedOutAt: ReadonlyMap<string, string>,
 ): BranchEntry[] {
   const entries: BranchEntry[] = []
-  for (const record of stdout.split(RECORD_SEPARATOR)) {
-    // git writes a newline after each record's terminator, so every record but the first arrives
-    // with it still attached; the last split part is the trailing newline alone.
-    const trimmed = record.replace(/^\r?\n/u, '')
-    if (trimmed === '') continue
-    const fields = trimmed.split(FIELD_SEPARATOR)
+  for (const record of branchRecords(stdout)) {
+    const fields = record.split(FIELD_SEPARATOR)
     if (fields.length < 10) continue
     const [ref, name, sha, upstream, track, committed, author, head, symref, ...subject] =
       fields as [string, string, string, string, string, string, string, string, string, ...string[]]
@@ -203,6 +227,113 @@ export function branchWorktreeIndex(worktrees: readonly WorktreeEntry[]): Map<st
     if (worktree.branch !== undefined) index.set(worktree.branch, worktree.path)
   }
   return index
+}
+
+/**
+ * The config keys a background reading needs to see before it runs: every filter driver's program,
+ * and whether per-worktree config is enabled (which decides where else a driver can be defined).
+ * git lower-cases section and variable names, so the extension key is matched in that spelling.
+ */
+export const READING_CONFIG_KEYS = '^(filter\\..+\\.(clean|process)|extensions\\.worktreeconfig)$'
+
+/**
+ * Split `git config --null --get-regexp` output into key and value pairs.
+ *
+ * Each record is `<key>\n<value>\0`; a key set without a value (`[extensions] worktreeConfig`) has
+ * no newline at all, which git reads as boolean true.
+ * @param stdout - the captured output.
+ * @returns each record's key and value, the value undefined for a valueless key.
+ */
+function configRecords(stdout: string): Array<{ readonly key: string; readonly value: string | undefined }> {
+  return stdout.split('\0').filter(record => record !== '').map((record) => {
+    const newline = record.indexOf('\n')
+    return newline < 0
+      ? { key: record, value: undefined }
+      : { key: record.slice(0, newline), value: record.slice(newline + 1) }
+  })
+}
+
+/**
+ * Read the filter driver names out of a query for {@link READING_CONFIG_KEYS}.
+ *
+ * The section and variable of a key arrive lower-cased while the subsection — the driver name —
+ * keeps its case, and it is the subsection alone that is wanted, so the name is everything between
+ * `filter.` and the last dot.
+ * @param stdout - the captured `git config --null --get-regexp` output.
+ * @returns every distinct driver name, in first-seen order.
+ */
+export function parseFilterDrivers(stdout: string): string[] {
+  const names = new Set<string>()
+  for (const { key } of configRecords(stdout)) {
+    const last = key.lastIndexOf('.')
+    if (!key.startsWith('filter.') || last <= 'filter.'.length) continue
+    names.add(key.slice('filter.'.length, last))
+  }
+  return [...names]
+}
+
+/** git's spellings of boolean true, compared lower-cased. */
+const GIT_TRUE: ReadonlySet<string> = new Set(['true', 'yes', 'on', '1'])
+
+/**
+ * Whether a query for {@link READING_CONFIG_KEYS} found `extensions.worktreeConfig` switched on.
+ * @param stdout - the captured `git config --null --get-regexp` output.
+ * @returns true when the last value set is one git reads as true.
+ */
+export function worktreeConfigEnabled(stdout: string): boolean {
+  const values = configRecords(stdout).filter(record => record.key === 'extensions.worktreeconfig')
+  const last = values.at(-1)
+  if (last === undefined) return false
+  return last.value === undefined || GIT_TRUE.has(last.value.trim().toLowerCase())
+}
+
+/** How many ignored entries {@link parseContents} keeps by name. */
+export const IGNORED_SAMPLE = 20
+
+/** A worktree's uncommitted, untracked, and ignored entries, from one status reading. */
+export interface ContentsReading {
+  readonly modified: number
+  readonly untracked: number
+  readonly ignored: number
+  readonly ignoredPaths: readonly string[]
+}
+
+/**
+ * Parse `git status --porcelain=v2 --ignored -z` output into what a removal would delete.
+ * @param stdout - the captured output, written without `--branch`.
+ * @returns the three counts and the first {@link IGNORED_SAMPLE} ignored entries.
+ */
+export function parseContents(stdout: string): ContentsReading {
+  let modified = 0
+  let untracked = 0
+  const ignoredPaths: string[] = []
+  let ignored = 0
+  const fields = stdout.split('\0')
+  for (let index = 0; index < fields.length; index += 1) {
+    const field = fields[index] ?? ''
+    const kind = field.charAt(0)
+    switch (kind) {
+      case '?':
+        untracked += 1
+        break
+      case '!':
+        ignored += 1
+        if (ignoredPaths.length < IGNORED_SAMPLE) ignoredPaths.push(field.slice(2))
+        break
+      case '1':
+      case 'u':
+        modified += 1
+        break
+      case '2':
+        modified += 1
+        // A rename's original path is its own NUL-terminated field, never a record of its own.
+        index += 1
+        break
+      default:
+        break
+    }
+  }
+  return { modified, untracked, ignored, ignoredPaths }
 }
 
 /** What `git status --porcelain=v2 --branch` says about HEAD, beyond the change records. */

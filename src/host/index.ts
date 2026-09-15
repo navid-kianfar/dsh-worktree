@@ -22,9 +22,10 @@ import { WorktreeOperations } from './operations.ts'
 import { CommandUnavailableError } from './run.ts'
 import type {
   AddWorktreeRequest, AddWorktreeResult, CheckoutRequest, CreateBranchRequest, DeleteBranchRequest,
-  GitFailure, LockWorktreeRequest, MutationResult, OverviewResult, RemoveWorktreeRequest,
-  RenameBranchRequest, RepoRequest, SuggestBranchNameRequest, SuggestBranchNameResult,
-  SuggestPathRequest, SuggestPathResult, WorktreeSettings, WorktreeView,
+  GitFailure, InspectWorktreeRequest, InspectWorktreeResult, LockWorktreeRequest, MutationResult,
+  OverviewResult, RemoveWorktreeRequest, RenameBranchRequest, RepoRequest, SearchBranchesRequest,
+  SearchBranchesResult, SuggestBranchNameRequest, SuggestBranchNameResult, SuggestPathRequest,
+  SuggestPathResult, WorktreeSettings, WorktreeView,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -173,6 +174,17 @@ export class WorktreeService extends TypertRemoteService {
   }
 
   /**
+   * Find branches whose name contains some text, past the ceiling a reading is cut at.
+   * @param request - the repository and the text to search for.
+   * @param signal - gateway-supplied cancellation for the caller's abandoned request.
+   * @returns the matching branches, or a classified failure.
+   */
+  @Remote('searchBranches')
+  async searchBranches(request: SearchBranchesRequest, signal: AbortSignal): Promise<SearchBranchesResult> {
+    return guard(() => this.operations.searchBranches(request, signal))
+  }
+
+  /**
    * Update remote-tracking refs and drop the ones whose remote branch is gone.
    * @param request - the workspace directory whose repository to fetch.
    * @param signal - gateway-supplied cancellation for the caller's abandoned request.
@@ -267,8 +279,21 @@ export class WorktreeService extends TypertRemoteService {
   }
 
   /**
-   * Remove a worktree.
-   * @param request - the worktree path, and whether to remove one holding uncommitted work.
+   * Report what removing a worktree would delete that no commit keeps: its modified, untracked, and
+   * ignored entries.
+   * @param request - the repository and the worktree path.
+   * @param signal - gateway-supplied cancellation for the caller's abandoned request.
+   * @returns the counts and the first ignored entries, or a classified failure.
+   */
+  @Remote('inspectWorktree')
+  async inspectWorktree(request: InspectWorktreeRequest, signal: AbortSignal): Promise<InspectWorktreeResult> {
+    return guard(() => this.operations.inspectWorktree(request, signal))
+  }
+
+  /**
+   * Remove a worktree. One holding ignored files is refused unless the request says to delete them.
+   * @param request - the worktree path, whether to remove one holding uncommitted work, and whether
+   * its ignored files may go with it.
    * @param signal - gateway-supplied cancellation for the caller's abandoned request.
    * @returns git's summary, or a classified failure.
    */

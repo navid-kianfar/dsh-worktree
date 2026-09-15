@@ -3,7 +3,7 @@ import type {
   RemoteResult,
   TypertRemoteContribution,
 } from '@deepseek-ai/dsh-typert-protocol'
-import type { AddWorktreeRequest, AddWorktreeResult, CheckoutRequest, CreateBranchRequest, DeleteBranchRequest, LockWorktreeRequest, MutationResult, OverviewResult, RemoveWorktreeRequest, RenameBranchRequest, RepoRequest, SuggestBranchNameRequest, SuggestBranchNameResult, SuggestPathRequest, SuggestPathResult, WorktreeView } from '../src/host/types.ts'
+import type { AddWorktreeRequest, AddWorktreeResult, CheckoutRequest, CreateBranchRequest, DeleteBranchRequest, InspectWorktreeRequest, InspectWorktreeResult, LockWorktreeRequest, MutationResult, OverviewResult, RemoveWorktreeRequest, RenameBranchRequest, RepoRequest, SearchBranchesRequest, SearchBranchesResult, SuggestBranchNameRequest, SuggestBranchNameResult, SuggestPathRequest, SuggestPathResult, WorktreeView } from '../src/host/types.ts'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$776f726b74726565 {
@@ -13,11 +13,13 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     deleteBranch: (request: DeleteBranchRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
     describe: (signal?: AbortSignal) => Promise<RemoteResult<WorktreeView>>
     fetch: (request: RepoRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
+    inspectWorktree: (request: InspectWorktreeRequest, signal?: AbortSignal) => Promise<RemoteResult<InspectWorktreeResult>>
     lockWorktree: (request: LockWorktreeRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
     overview: (request: RepoRequest, signal?: AbortSignal) => Promise<RemoteResult<OverviewResult>>
     pruneWorktrees: (request: RepoRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
     removeWorktree: (request: RemoveWorktreeRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
     renameBranch: (request: RenameBranchRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
+    searchBranches: (request: SearchBranchesRequest, signal?: AbortSignal) => Promise<RemoteResult<SearchBranchesResult>>
     suggestBranchName: (request: SuggestBranchNameRequest, signal?: AbortSignal) => Promise<RemoteResult<SuggestBranchNameResult>>
     suggestPath: (request: SuggestPathRequest, signal?: AbortSignal) => Promise<RemoteResult<SuggestPathResult>>
   }
@@ -28,11 +30,13 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'worktree/deleteBranch': (request: DeleteBranchRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
     'worktree/describe': (signal?: AbortSignal) => Promise<RemoteResult<WorktreeView>>
     'worktree/fetch': (request: RepoRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
+    'worktree/inspectWorktree': (request: InspectWorktreeRequest, signal?: AbortSignal) => Promise<RemoteResult<InspectWorktreeResult>>
     'worktree/lockWorktree': (request: LockWorktreeRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
     'worktree/overview': (request: RepoRequest, signal?: AbortSignal) => Promise<RemoteResult<OverviewResult>>
     'worktree/pruneWorktrees': (request: RepoRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
     'worktree/removeWorktree': (request: RemoveWorktreeRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
     'worktree/renameBranch': (request: RenameBranchRequest, signal?: AbortSignal) => Promise<RemoteResult<MutationResult>>
+    'worktree/searchBranches': (request: SearchBranchesRequest, signal?: AbortSignal) => Promise<RemoteResult<SearchBranchesResult>>
     'worktree/suggestBranchName': (request: SuggestBranchNameRequest, signal?: AbortSignal) => Promise<RemoteResult<SuggestBranchNameResult>>
     'worktree/suggestPath': (request: SuggestPathRequest, signal?: AbortSignal) => Promise<RemoteResult<SuggestPathResult>>
   }

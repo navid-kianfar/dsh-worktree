@@ -26,6 +26,10 @@
  * - **Not a repository, git unavailable, or switched off** — the pill is drawn disabled, the branch
  *   half reads "no git", the checkbox cannot be ticked, and the tooltip says why. No error box: there
  *   is nothing to do about it here, but an absent control leaves people wondering where it went.
+ * - **The probe or the first reading failed** (a timeout, git exiting with an error, the request not
+ *   reaching the Host) — drawn disabled the same way, reading "git error" with the failure as its
+ *   tooltip, while the reading is retried with backoff. Holding "still reading" over a request that
+ *   already failed was a placeholder that never went away.
  * @module @achasoft/dsh-worktree/client/HeroWorkspace
  */
 
@@ -43,6 +47,8 @@ import { branchLabel, elideMiddle } from './format.ts'
 import { PickerPopover, type PickerRow } from './PickerPopover.tsx'
 import { heroPicker, stagedSessions } from './staging.ts'
 import { heroPillState, type HeroPillState } from './surfaceState.ts'
+import { mergeMatches } from './branchSearch.ts'
+import { useBranchSearch } from './useBranchSearch.ts'
 import { useWorktree } from './useWorktree.ts'
 import css from './surface.module.css'
 
@@ -70,12 +76,15 @@ export function HeroWorkspace(props: HeroWorkspaceProps) {
     [commandsFor, selectedPath],
   )
   const state = useWorktree(describeWorktree, commands)
-  const { view, overview, busy, run, failure, clearFailure } = state
+  const { view, viewError, overview, busy, run, failure, readFailure, clearFailure } = state
   const staging = useSyncExternalStore(stagedSessions.subscribe, stagedSessions.getSnapshot)
   const staged = selectedId === undefined ? undefined : staging.get(selectedId)
   const [browseFailure, setBrowseFailure] = useState<string | undefined>(undefined)
   const [browsing, setBrowsing] = useState(false)
   const [branchesOpen, setBranchesOpen] = useState(false)
+  const [branchQuery, setBranchQuery] = useState('')
+  const truncated = overview?.branchesTruncated === true
+  const branchSearch = useBranchSearch(truncated, branchesOpen ? branchQuery : '', commands?.searchBranches ?? null)
   const branchAnchor = useRef<HTMLButtonElement>(null)
   // A stable stand-in for an owner that supplied no anchor: a fresh object per render would re-run
   // the popover's placement effect on every render, and placement itself re-renders.
@@ -117,12 +126,14 @@ export function HeroWorkspace(props: HeroWorkspaceProps) {
     selected: workspace.workspaceId === selectedId,
   }))
 
-  const pill = heroPillState({ hasProject: selectedId !== undefined, view, overview, failure })
+  // The READING failure only: a refused checkout belongs in the dropdown and must not disable the pill.
+  const pill = heroPillState({ hasProject: selectedId !== undefined, view, viewError, overview, failure: readFailure })
   const pillReady = pill.kind === 'ready'
   const repo = pillReady ? pill.overview.repo : undefined
   // A staged worktree the project turns out not to support must not linger: the send gate acts on
   // the staged choice, and a disabled checkbox cannot be unticked. A reading that has merely not
-  // landed yet is not grounds — the pill becomes interactive as soon as it does.
+  // landed yet is not grounds — the pill becomes interactive as soon as it does — and neither is a
+  // failed one, which is retried and may yet succeed.
   const unsupported = pill.kind === 'unsupported'
   useEffect(() => {
     if (unsupported && selectedId !== undefined) stagedSessions.clear(selectedId)
@@ -133,7 +144,9 @@ export function HeroWorkspace(props: HeroWorkspaceProps) {
     ? staged.baseBranch
     : repo === undefined ? '' : branchLabel(repo, t('chip.detached'))
 
-  const branchRows: readonly PickerRow[] = (overview?.branches ?? []).map(branch => ({
+  // The picker filters these rows itself; past the reading's ceiling the Host's matches for the typed
+  // text are appended, so a branch beyond it can still be picked as the base or switched to.
+  const branchRows: readonly PickerRow[] = mergeMatches(overview?.branches ?? [], branchSearch, branchQuery).map(branch => ({
     id: branch.name,
     label: branch.name,
     ...branch.kind === 'remote' ? { detail: t('branches.remote') } : {},
@@ -232,6 +245,10 @@ export function HeroWorkspace(props: HeroWorkspaceProps) {
 
       {pill.kind === 'unsupported' && <InertPill t={t} reason={unsupportedTooltip(pill, t)} />}
 
+      {pill.kind === 'error' && (
+        <InertPill t={t} text={t('hero.gitError')} reason={t('hero.gitError.because', { reason: pill.detail })} />
+      )}
+
       <PickerPopover
         open={pillReady && branchesOpen}
         anchorRef={branchAnchor}
@@ -243,6 +260,8 @@ export function HeroWorkspace(props: HeroWorkspaceProps) {
         emptyText={t('branches.empty')}
         error={branchesOpen ? failure?.message ?? null : null}
         busy={busy}
+        onQueryChange={setBranchQuery}
+        notice={truncated ? branchNotice(branchSearch.kind, branchQuery, overview?.branches.length ?? 0, t) : null}
       />
 
       {browseFailure !== undefined && (
@@ -250,6 +269,26 @@ export function HeroWorkspace(props: HeroWorkspaceProps) {
       )}
     </>
   )
+}
+
+/**
+ * The line under a truncated branch dropdown.
+ * @param search - where the Host search for the typed text stands.
+ * @param query - the typed text.
+ * @param count - how many branches the held reading lists.
+ * @param t - the locale seat.
+ * @returns the sentence, or null once the Host has answered for the text.
+ */
+function branchNotice(
+  search: 'idle' | 'pending' | 'done' | 'failed', query: string, count: number, t: HeroWorkspaceProps['t'],
+): string | null {
+  if (query.trim() === '') return t('branches.truncated', { count: String(count) })
+  switch (search) {
+    case 'pending': return t('branches.searching')
+    case 'failed': return t('branches.searchFailed', { count: String(count) })
+    case 'idle': return t('branches.truncated', { count: String(count) })
+    case 'done': return null
+  }
 }
 
 /**
@@ -271,7 +310,8 @@ function unsupportedTooltip(
 }
 
 /**
- * The pill's shape with nothing to act on: the loading placeholder, or the disabled "no git" pill.
+ * The pill's shape with nothing to act on: the loading placeholder, or the disabled "no git" or
+ * "git error" pill.
  *
  * One component for both so they are the same size as each other and as the live pill — the row
  * holds its layout through all three. Nothing inside is a button: the branch half is text, and the
@@ -282,9 +322,15 @@ function unsupportedTooltip(
  * @param props.t - the locale seat.
  * @param props.loading - render the placeholder rather than the disabled pill.
  * @param props.reason - the disabled pill's tooltip.
+ * @param props.text - the disabled pill's branch-half label; "no git" when absent.
  * @returns the inert pill.
  */
-function InertPill({ t, loading = false, reason }: { t: HeroWorkspaceProps['t']; loading?: boolean; reason?: string }) {
+function InertPill({ t, loading = false, reason, text }: {
+  t: HeroWorkspaceProps['t']
+  loading?: boolean
+  reason?: string
+  text?: string
+}) {
   const body = (
     <span
       className={loading ? css.heroPillLoading : css.heroPillDisabled}
@@ -297,7 +343,7 @@ function InertPill({ t, loading = false, reason }: { t: HeroWorkspaceProps['t'];
         <IconBranchOutline16 className={css.heroIcon} size={14} />
         {loading
           ? <span className={css.heroPlaceholder} aria-hidden="true" />
-          : <span className={css.heroText}>{t('hero.noGit')}</span>}
+          : <span className={css.heroText}>{text ?? t('hero.noGit')}</span>}
       </span>
       <span className={css.heroPillDivider} aria-hidden="true" />
       <label className={css.heroPillStaticCheck}>

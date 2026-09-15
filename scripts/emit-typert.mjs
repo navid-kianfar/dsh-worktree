@@ -125,7 +125,22 @@ const addWorktreeResult = `z.union([z.object({
   'ok': z.literal(true).readonly(),
   'path': z.string().readonly(),
   'branch': z.string().readonly().optional(),
+  'sha': z.string().readonly().optional(),
   'detail': z.string().readonly(),
+}), ${gitFailure}])`
+
+const inspectWorktreeResult = `z.union([z.object({
+  'ok': z.literal(true).readonly(),
+  'modified': z.number().readonly(),
+  'untracked': z.number().readonly(),
+  'ignored': z.number().readonly(),
+  'ignoredPaths': z.array(z.string()).readonly(),
+}), ${gitFailure}])`
+
+const searchBranchesResult = `z.union([z.object({
+  'ok': z.literal(true).readonly(),
+  'branches': z.array(${branchEntry}).readonly(),
+  'truncated': z.boolean().readonly(),
 }), ${gitFailure}])`
 
 const suggestBranchNameResult = `z.union([z.object({
@@ -197,6 +212,7 @@ const ENDPOINTS = [
     params: [{ name: 'request', type: 'DeleteBranchRequest', schema: request(
       `'branch': z.string().readonly(),`,
       `'force': z.boolean().readonly(),`,
+      `'expectedTip': z.string().readonly().optional(),`,
     ) }],
     cancellation: true,
     result: { type: 'MutationResult', schema: mutationResult },
@@ -212,6 +228,14 @@ const ENDPOINTS = [
     params: [{ name: 'request', type: 'RepoRequest', schema: repoRequest }],
     cancellation: true,
     result: { type: 'MutationResult', schema: mutationResult },
+  },
+  {
+    method: 'inspectWorktree',
+    params: [{ name: 'request', type: 'InspectWorktreeRequest', schema: request(
+      `'path': z.string().readonly(),`,
+    ) }],
+    cancellation: true,
+    result: { type: 'InspectWorktreeResult', schema: inspectWorktreeResult },
   },
   {
     method: 'lockWorktree',
@@ -240,6 +264,7 @@ const ENDPOINTS = [
     params: [{ name: 'request', type: 'RemoveWorktreeRequest', schema: request(
       `'path': z.string().readonly(),`,
       `'force': z.boolean().readonly(),`,
+      `'discardIgnored': z.boolean().readonly().optional(),`,
     ) }],
     cancellation: true,
     result: { type: 'MutationResult', schema: mutationResult },
@@ -252,6 +277,14 @@ const ENDPOINTS = [
     ) }],
     cancellation: true,
     result: { type: 'MutationResult', schema: mutationResult },
+  },
+  {
+    method: 'searchBranches',
+    params: [{ name: 'request', type: 'SearchBranchesRequest', schema: request(
+      `'query': z.string().readonly(),`,
+    ) }],
+    cancellation: true,
+    result: { type: 'SearchBranchesResult', schema: searchBranchesResult },
   },
   {
     method: 'suggestBranchName',

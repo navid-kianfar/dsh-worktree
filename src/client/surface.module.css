@@ -1094,3 +1094,16 @@
   padding: 6px;
   border-top: 1px solid var(--dsw-alias-border-l1);
 }
+
+/* The ignored entries a worktree removal would delete, named in its confirmation. Capped in height
+   because the Host names up to twenty, and the confirm button must stay on screen beneath them. */
+.pathList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 120px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}

@@ -22,13 +22,13 @@ The plugin also owns the **new-session row**, laid out like Claude Code's: where
      switcher         own mode chip                    git worktree
 ```
 
-Whenever a project is selected the pill holds that third place. While the first reading is on its way it is a neutral placeholder; for a folder that is not a git repository — or when git cannot run on the host, or the control is switched off — it stays, disabled, reading **no git**, with the reason in its tooltip.
+Whenever a project is selected the pill holds that third place. While the first reading is on its way it is a neutral placeholder; for a folder that is not a git repository — or when git cannot run on the host, or the control is switched off — it stays, disabled, reading **no git**, with the reason in its tooltip. When the reading itself fails (a timeout, git exiting with an error, the request not reaching the host) it reads **git error** with git's message as its tooltip, and the reading is retried with backoff.
 
 ## What it does
 
-**Branches** — list local and remote-tracking branches with their tip commit, author, age, and ahead/behind counters; filter them by fuzzy search; switch, create, rename, and delete. A branch already checked out in another worktree says so and jumps there instead of failing, because git refuses to check one branch out twice. `Fetch` updates remote-tracking refs and prunes the ones whose remote branch is gone.
+**Branches** — list local and remote-tracking branches with their tip commit, author, age, and ahead/behind counters; filter them by fuzzy search — and when the list was cut at `maxBranches`, typing also asks the host for every branch whose name contains the text, so a branch past the ceiling is found rather than offered as a new one; switch, create, rename, and delete. A branch already checked out in another worktree says so and jumps there instead of failing, because git refuses to check one branch out twice. `Fetch` updates remote-tracking refs and prunes the ones whose remote branch is gone.
 
-**Worktrees** — list every worktree of the repository with its branch, path, and lock or prunable state; open a session in one; lock, unlock, remove, and prune. Creating a worktree fills its directory from a configurable path template, then optionally registers it as a Workspace and starts a session in it.
+**Worktrees** — list every worktree of the repository with its branch, path, and lock or prunable state; open a session in one; lock, unlock, remove, and prune. The worktree the current session is working in cannot be removed from its own row. Creating a worktree fills its directory from a configurable path template, then optionally registers it as a Workspace and starts a session in it.
 
 **Project switcher** — the session-start chip opens a searchable list of your Workspaces (names match fuzzily, paths as plain text) with **Browse for folder…** underneath, which opens the host's own folder chooser and starts a session in whatever it returns.
 
@@ -36,7 +36,7 @@ Whenever a project is selected the pill holds that third place. While the first 
 
 **Worktree checkbox** — tick it and the session runs in a **fresh git worktree** instead of the repository itself. Ticking creates nothing. When you send the first message, the worktree is created from the chosen branch on a new branch **named from that message** — by your deployment's own model, falling back to a slug of the prompt — and the message is sent from inside it. Unticking before you send leaves nothing behind. A project that is not a git repository shows the pill disabled as **no git**, and a worktree staged before that was known is unticked.
 
-**Uncommitted work is never discarded.** A checkout with local changes uses `git switch --merge`, which carries them across and aborts on conflict. A force-delete or force-remove is a separate switch, and by default also needs the branch or worktree name typed to confirm.
+**Uncommitted work is never discarded.** A checkout with local changes uses `git switch --merge`, which carries them across and aborts on conflict. A force-delete or force-remove is a separate switch, and by default also needs the branch or worktree name typed to confirm. Ignored files get their own gate, because `git worktree remove` deletes them even unforced: the removal dialog first reads the worktree, lists its ignored entries (a `.env`, a build directory), and will not remove it until you tick that they may go — and the host refuses a removal over ignored files without that acknowledgement.
 
 ## Requirements
 
@@ -78,13 +78,13 @@ Every field is editable from **Settings → Plugins → Worktrees and branches**
 | `registerWorkspace` | `true` | Adopt a worktree's directory as a harness Workspace. |
 | `openSession` | `true` | Open a session in that Workspace. Requires `registerWorkspace`. |
 | `includeRemoteBranches` | `true` | List remote-tracking branches beside the local ones. |
-| `maxBranches` | `200` | Most branches one reading returns; the list says when it truncated. |
+| `maxBranches` | `200` | Most branches one reading returns; the list says when it truncated, and a typed search then also asks the host. |
 | `refreshIntervalMs` | `15000` | How often the row re-reads. `0` reads only on an explicit refresh. |
 | `gitTimeoutMs` | `20000` | Bound for a local git command. |
 | `networkTimeoutMs` | `120000` | Bound for a command that contacts a remote. Never below `gitTimeoutMs`. |
 | `maxOutputBytes` | `1048576` | In-memory cap per captured git stream. |
 | `graceMs` | `5000` | TERM-to-KILL grace when a git command is terminated. |
-| `confirmDestructive` | `true` | Require typing the name before a force-delete or force-remove. |
+| `confirmDestructive` | `true` | Require typing the name before a force-delete or force-remove. Removing a worktree that holds ignored files always needs its own acknowledgement. |
 
 ### Path template
 
@@ -104,7 +104,9 @@ The template must contain `{branch}` or `{branchPath}`; without one, every workt
 
 **git runs on the host, never in the browser.** Reading a repository means running `git` and parsing its machine formats, and creating a worktree means writing a directory — neither is reachable from a page. What crosses the wire is already classified: parsed readings, and mutation outcomes carrying git's own summary line.
 
-**A value from the browser becomes a git argument only after the host has proved what it names** — a branch through `rev-parse --verify`, a worktree path by matching git's own `worktree list`. The one path that skips that check, a new worktree's destination, must be absent or an empty directory.
+**A value from the browser becomes a git argument only after the host has proved what it names** — a branch through the shared name rules and `rev-parse --verify`, a worktree path by matching git's own `worktree list`. The one path that skips that check, a new worktree's destination, must be absent or an empty directory. A name beginning with `-` is refused on both halves, as `git check-ref-format --branch` refuses it: in an argument list `-f` or `-D` is an option, and renaming a branch to `-f` would otherwise force-rename the current branch over another. Where git's parser allows it (`git branch`, `git worktree`), `--` also ends the options before those values.
+
+**Opening a folder runs nothing the folder configures.** The row reads a repository as soon as a folder is selected and again on every poll, so every git invocation runs with `core.fsmonitor=false`, and the background `status` additionally switches off every filter driver the repository's local or per-worktree config defines (git runs a clean filter to compare a file whose timestamp changed), takes no optional locks, and does not descend into submodules' working trees (`--ignore-submodules=dirty`, since a submodule's own status would read its own config). Filters configured globally — git-lfs, for instance — are yours and keep working. A repository whose filter driver name cannot be expressed on git's command line is not read automatically at all.
 
 **Nothing here is model-facing.** Which branch you are on is operator context that never enters a prompt, so the plugin adds no tool, no prompt contribution, and no session event. The agent reaches git the way it always has: through the shell. The one model call this plugin makes is its own — naming a worktree's branch — and its answer reaches git as a branch name, never as prompt text.
 
@@ -112,9 +114,11 @@ The template must contain `{branch}` or `{branchPath}`; without one, every workt
 
 **The session's control sits above the composer, not in the header.** It takes `conversation.input.dock`, the harness's full-width row stacked above the composer card, at an `order` after the core todo and queue entries so it is the row touching the card. That is where the new-session pill sat before the first prompt, so the control does not move when the session starts, and it stays next to the prompt it qualifies. The shell also renders the dock on the blank new-session screen, so the row mirrors the shell's own phase rule and draws nothing until the session has left it. Its popovers open upward and are capped at the room above the row.
 
-**The worktree is made on the first send, because the harness offers no hook before one.** Input triggers only adjudicate drafts that start with `/`, and a command claim cannot be released once taken, so a small seat inside the composer card listens for Enter and the send button in the capture phase — and only while a worktree is staged, no trigger menu owns Enter, nothing is composing, and the harness's own send button is enabled. It locks the composer, names and creates the worktree, adopts it as a Workspace, and moves there through the same workspace switch a manual pick uses, which carries the draft and its attachments; the seat in the worktree's session then sends the carried draft with the composer's own submit. It confirms the session is still on screen before anything lasting and again before moving, and if the move does not land in time it removes the Workspace, worktree and branch again and restores the checkbox: nothing sent means nothing left behind.
+**The worktree is made on the first send, because the harness offers no hook before one.** Input triggers only adjudicate drafts that start with `/`, and a command claim cannot be released once taken, so a small seat inside the composer card listens for Enter and the send button in the capture phase — and only while a worktree is staged, no trigger menu owns Enter, nothing is composing, and the harness's own send button is enabled. It locks the composer, names and creates the worktree, adopts it as a Workspace, and moves there through the same workspace switch a manual pick uses, which carries the draft and its attachments; the seat in the worktree's session then sends the carried draft with the composer's own submit. It confirms the session is still on screen before anything lasting and again before moving, and if the move does not land in time it removes the Workspace, worktree and branch again and restores the checkbox: nothing sent means nothing left behind. The branch is deleted only while it still points at the commit it was created at — which proves it holds no work, even when its base is not merged into the project's HEAD and a plain `git branch -d` would refuse.
 
 **Remote branches are never deleted.** Deleting one means pushing a deletion to somebody else's repository, which is not something a switcher popover should be able to do by accident.
+
+**The settings card shows a change the host refused.** The bound settings scope resolves even when the host rejects a write, so each write is checked against the stored value afterwards and a refusal is shown at the top of the card; the two dependent switches are written dependent-first, as one mutation where the harness supports it.
 
 **Removing a worktree leaves its Workspace registered.** The removal dialog promises to delete a directory and keep the branch; silently un-registering a Workspace you may have created yourself is a different domain's business. Remove it from the sidebar when you want it gone.
 

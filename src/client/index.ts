@@ -1,7 +1,7 @@
 /**
  * Worktree plugin, browser half. The branch and worktree row above the composer, the new-session
- * project switcher and pill, the composer's first-send gate, the naming watcher in the session
- * header, and the worktree card on the plugin settings tab keyed by the `worktree` namespace.
+ * project switcher and pill, the composer's first-send gate, and the worktree card on the plugin
+ * settings tab keyed by the `worktree` namespace.
  *
  * Everything git goes over this plugin's own Remote namespace, because a page cannot run a process.
  * The two things the browser DOES own are the ones the Host cannot reach: which workspace the
@@ -15,7 +15,7 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { ClientContext, SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: the ctx.remote Context merge and the generated `worktree` namespace.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
-// Type-only: pulls the ui-conversation SlotMap merge (the input dock, hero, composer, and header seats).
+// Type-only: pulls the ui-conversation SlotMap merge (the input dock, hero, and composer seats).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -29,29 +29,29 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import worktreeRemote from '../../generated/typert.remote-client.js'
 import type { WorktreeSettings } from '../host/types.ts'
 import type {
-  WorktreeChipInjected, WorktreeCommands, WorktreeHeroInjected, WorktreeNamingInjected,
-  WorktreeSendGateInjected, WorktreeSettingsInjected,
+  WorktreeChipInjected, WorktreeCommands, WorktreeHeroInjected, WorktreeSendGateInjected,
+  WorktreeSettingsInjected,
 } from './contract.ts'
 import { WorktreeSendGate } from './SendGate.tsx'
 import { WorktreeChip } from './WorktreeChip.tsx'
 import { HeroWorkspace } from './HeroWorkspace.tsx'
-import { WorktreeNaming } from './WorktreeNaming.tsx'
 import { WorktreeSettingsCard } from './WorktreeSettingsCard.tsx'
+import { forgetLegacyIntents } from './legacy.ts'
+import { createFieldWriter, type WritableScope } from './settingsWrites.ts'
 import { en, zh, type WorktreeKey } from './locales.ts'
 
 export type {
-  WorktreeChipInjected, WorktreeCommands, WorktreeHeroInjected, WorktreeNamingInjected,
-  WorktreeSendGateInjected, WorktreeSettingsInjected,
+  WorktreeChipInjected, WorktreeCommands, WorktreeHeroInjected, WorktreeSendGateInjected,
+  WorktreeSettingsInjected,
 } from './contract.ts'
 export type { WorktreeKey } from './locales.ts'
 export type { WorktreeChipProps } from './WorktreeChip.tsx'
 export type { HeroWorkspaceProps } from './HeroWorkspace.tsx'
 export type { WorktreeSendGateProps } from './SendGate.tsx'
 export type { StagedSession } from './staging.ts'
-export type { WorktreeNamingProps } from './WorktreeNaming.tsx'
 export type { WorktreeSettingsCardProps } from './WorktreeSettingsCard.tsx'
 export type { WorktreeState } from './useWorktree.ts'
-export type { WorktreeIntent, WorktreeIntentStore } from './intents.ts'
+export type { FieldWrite } from './settingsWrites.ts'
 export type { RelativeAge } from './format.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -89,6 +89,11 @@ export const inject = ['locale', 'remote', 'workspaces']
  * @returns after the `worktree` namespace is callable; its methods are withdrawn when this fiber unloads.
  */
 export async function apply(ctx: ClientContext): Promise<void> {
+  // Once per page load. An earlier build persisted worktree "intents" here for a header seat that
+  // renamed branches from a session's draft; the seat is gone, and a record left behind must not
+  // outlive it. The outcome is not acted on: storage that refuses access holds nothing reachable.
+  forgetLegacyIntents(typeof localStorage === 'undefined' ? undefined : localStorage)
+
   // Mounted on THIS fiber, so the endpoint's lifetime is the plugin's.
   await ctx.remote.$mount(worktreeRemote)
   ctx.effect(() => ctx.locale.register(LOCALE_NS, { zh, en }), 'worktree: dictionaries')
@@ -147,6 +152,7 @@ function surface(ctx: ClientContext): void {
    */
   const commandsFor = (workspacePath: string): WorktreeCommands => ({
     overview: signal => remote.overview({ workspacePath }, signal).then(unwrap),
+    searchBranches: (query, signal) => remote.searchBranches({ workspacePath, query }, signal).then(unwrap),
     fetch: () => remote.fetch({ workspacePath }).then(unwrap),
     checkout: request => remote.checkout({ ...request, workspacePath }).then(unwrap),
     createBranch: request => remote.createBranch({ ...request, workspacePath }).then(unwrap),
@@ -155,6 +161,7 @@ function surface(ctx: ClientContext): void {
     suggestPath: (branch, signal) => remote.suggestPath({ workspacePath, branch }, signal).then(unwrap),
     addWorktree: request => remote.addWorktree({ ...request, workspacePath }).then(unwrap),
     removeWorktree: request => remote.removeWorktree({ ...request, workspacePath }).then(unwrap),
+    inspectWorktree: (path, signal) => remote.inspectWorktree({ workspacePath, path }, signal).then(unwrap),
     lockWorktree: request => remote.lockWorktree({ ...request, workspacePath }).then(unwrap),
     pruneWorktrees: () => remote.pruneWorktrees({ workspacePath }).then(unwrap),
   })
@@ -309,24 +316,10 @@ function surface(ctx: ClientContext): void {
     }),
   }, WorktreeSendGate))
 
-  // Renders nothing; it exists to sit in the session scope and give a new worktree its real name
-  // once the first prompt names the task. See the module doc for why that cannot happen earlier. It
-  // stays in the header rather than following the chip to the dock: the dock is rendered inside the
-  // composer's fallback, which any routed `conversation.composer` replacement takes over, while the
-  // header is mounted for as long as the session is on screen.
-  ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
-    name: 'conversation.session.header.utilities',
-    id: 'worktree-naming',
-    locale: LOCALE_NS,
-    inject: (): WorktreeNamingInjected => ({
-      describeWorktree,
-      commandsFor,
-      renameWorkspace: async (workspaceId, title) => { await ctx.workspaces.rename(workspaceId, title) },
-      suggestBranchName: (prompt) => remote.suggestBranchName({ prompt }).then(unwrap),
-    }),
-  }, WorktreeNaming))
-
   const scope = ctx.settingsScope.bind<WorktreeSettings>({ namespace: SETTINGS_NS })
+  // Structural: the installed scope (0.1.5-rc.2) also has `mutate`, which the harness checkout this
+  // package compiles against does not declare; the writer uses it when present.
+  const setFields = createFieldWriter(scope as unknown as WritableScope)
   ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
     name: 'settings.plugin.item',
     key: SETTINGS_NS,
@@ -334,7 +327,7 @@ function surface(ctx: ClientContext): void {
     inject: (): WorktreeSettingsInjected => ({
       hooks: { worktreeSettings: scope satisfies SettingsScope<WorktreeSettings> },
       describeWorktree,
-      setField: (field, value) => scope.set(field, value),
+      setFields,
     }),
   }, WorktreeSettingsCard))
 }

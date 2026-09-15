@@ -53,6 +53,13 @@ export interface PickerPopoverProps {
   readonly error?: string | null
   /** Disable picking while an operation runs. */
   readonly busy?: boolean
+  /**
+   * Told the filter text whenever it changes, including the reset to empty on opening — for a list
+   * whose rows grow with what is typed, such as branches found past the reading's ceiling.
+   */
+  readonly onQueryChange?: (query: string) => void
+  /** A line under the list saying what it does not show, or what is still being looked for. */
+  readonly notice?: string | null
 }
 
 /** Gap between the chip and the panel, and the clearance kept from each viewport edge. */
@@ -65,7 +72,10 @@ const MARGIN = 12
  * @returns the portaled panel while open, otherwise nothing.
  */
 export function PickerPopover(props: PickerPopoverProps) {
-  const { open, anchorRef, onClose, rows, onPick, placeholder, ariaLabel, emptyText, action, error, busy } = props
+  const {
+    open, anchorRef, onClose, rows, onPick, placeholder, ariaLabel, emptyText, action, error, busy,
+    onQueryChange, notice,
+  } = props
   const panelRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState('')
@@ -76,6 +86,7 @@ export function PickerPopover(props: PickerPopoverProps) {
   useEffect(() => {
     if (!open) return
     setQuery('')
+    onQueryChange?.('')
     const selected = rows.findIndex(row => row.selected === true)
     setActive(selected < 0 ? 0 : selected)
     // Focus after the portal has mounted and been placed.
@@ -138,7 +149,10 @@ export function PickerPopover(props: PickerPopoverProps) {
         if (count === 0) return
         if (event.key === 'ArrowDown') { event.preventDefault(); setActive(index => (index + 1) % count); return }
         if (event.key === 'ArrowUp') { event.preventDefault(); setActive(index => (index - 1 + count) % count); return }
-        if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); choose(active) }
+        // Not for the Enter that confirms an input-method candidate, which older engines report only
+        // through the legacy key code 229.
+        const composing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
+        if (event.key === 'Enter' && !composing) { event.preventDefault(); choose(active) }
       }}
     >
       <div className={css.pickerSearch}>
@@ -149,7 +163,11 @@ export function PickerPopover(props: PickerPopoverProps) {
           value={query}
           placeholder={placeholder}
           aria-label={placeholder}
-          onChange={(event) => { setQuery(event.target.value); setActive(0) }}
+          onChange={(event) => {
+            setQuery(event.target.value)
+            setActive(0)
+            onQueryChange?.(event.target.value)
+          }}
         />
       </div>
 
@@ -175,6 +193,8 @@ export function PickerPopover(props: PickerPopoverProps) {
         ))}
         {matched.length === 0 && <li className={css.pickerEmpty}>{emptyText}</li>}
       </ul>
+
+      {notice != null && notice !== '' && <p className={css.pickerEmpty} aria-live="polite">{notice}</p>}
 
       {action !== undefined && (
         <div className={css.pickerFooter}>

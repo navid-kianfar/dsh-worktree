@@ -83,8 +83,11 @@ export function WorktreePanel(props: WorktreePanelProps) {
                 label: t('worktrees.remove'),
                 danger: true,
                 // git refuses to remove a locked worktree, so the entry says so by being unusable
-                // rather than by failing after the confirmation.
-                disabled: entry.locked,
+                // rather than by failing after the confirmation. The worktree this session runs in
+                // is refused too (by the Host as well): removing it deletes the session's own
+                // directory out from under it.
+                disabled: entry.locked || entry.current,
+                ...entry.current ? { reason: t('worktrees.remove.current') } : {},
                 onSelect: () => { onRemove(entry) },
               },
             )

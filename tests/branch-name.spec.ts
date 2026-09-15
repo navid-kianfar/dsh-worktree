@@ -18,6 +18,16 @@ describe('checkBranchName', () => {
     }
   })
 
+  it('refuses a leading dash, which git would read as an option, as check-ref-format --branch does', () => {
+    for (const name of ['-f', '-D', '--track', '-']) {
+      expect(checkBranchName(name), name).toEqual({ ok: false, problem: 'shape' })
+    }
+    // Only the leading position is an option; git accepts a dash anywhere else.
+    for (const name of ['a-', 'a/-b', 'fix--it']) {
+      expect(checkBranchName(name), name).toEqual({ ok: true })
+    }
+  })
+
   it('refuses the characters git forbids', () => {
     for (const name of ['a b', 'a~b', 'a^b', 'a:b', 'a?b', 'a*b', 'a[b', 'a\\b', 'a\u0000b', 'a\u007fb']) {
       expect(checkBranchName(name), JSON.stringify(name)).toEqual({ ok: false, problem: 'character' })

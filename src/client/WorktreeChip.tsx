@@ -30,6 +30,7 @@ import { WorktreePanel } from './WorktreePanel.tsx'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { CreateWorktreeDialog } from './CreateWorktreeDialog.tsx'
 import { RenameDialog } from './RenameDialog.tsx'
+import { RemoveWorktreeDialog } from './RemoveWorktreeDialog.tsx'
 import { branchLabel, dirtyCount, elideMiddle, trackingLabel } from './format.ts'
 import { sessionStarted, type SessionPhaseFacts } from './surfaceState.ts'
 import { useWorktree } from './useWorktree.ts'
@@ -278,6 +279,7 @@ export function WorktreeChip(props: WorktreeChipProps) {
             t={t}
             branchPrefix={view.branchPrefix}
             onFetch={() => { void run(() => commands.fetch()) }}
+            onSearch={commands.searchBranches}
             onCheckout={(branch, carryChanges) => {
               void run(() => commands.checkout({ branch, carryChanges })).then((result) => {
                 if (result !== null) close()
@@ -391,21 +393,19 @@ export function WorktreeChip(props: WorktreeChipProps) {
       )}
 
       {dialog?.kind === 'remove-worktree' && (
-        <ConfirmDialog
-          title={t('worktrees.remove.title')}
-          body={t('worktrees.remove.body', { path: dialog.entry.path })}
-          forceLabel={t('worktrees.remove.force')}
-          typedValue={basenameOf(dialog.entry.path)}
+        <RemoveWorktreeDialog
+          entry={dialog.entry}
+          commands={commands}
           requireTyped={view.confirmDestructive}
-          confirmLabel={t('worktrees.remove.confirm')}
           t={t}
           failure={state.failure}
           busy={busy}
           onCancel={closeDialog}
-          onConfirm={(force) => {
-            void run(() => commands.removeWorktree({ path: dialog.entry.path, force })).then((result) => {
-              if (result !== null) closeDialog()
-            })
+          onConfirm={(force, discardIgnored) => {
+            void run(() => commands.removeWorktree({ path: dialog.entry.path, force, discardIgnored }))
+              .then((result) => {
+                if (result !== null) closeDialog()
+              })
           }}
         />
       )}

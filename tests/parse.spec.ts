@@ -5,8 +5,9 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  FIELD_SEPARATOR, RECORD_SEPARATOR, branchWorktreeIndex, parseBranches, parseStatus, parseTracking,
-  parseWorktrees,
+  FIELD_SEPARATOR, IGNORED_SAMPLE, RECORD_SEPARATOR, branchWorktreeIndex, countBranchRecords,
+  parseBranches, parseContents, parseFilterDrivers, parseStatus, parseTracking, parseWorktrees,
+  worktreeConfigEnabled,
 } from '../src/host/parse.ts'
 
 /** Assemble one `for-each-ref` record the way `BRANCH_FORMAT` writes it. */
@@ -287,5 +288,63 @@ describe('parseStatus', () => {
     expect(parseStatus(clean).dirty).toEqual({
       staged: 0, unstaged: 0, untracked: 0, conflicted: 0,
     })
+  })
+})
+
+describe('countBranchRecords', () => {
+  it('counts the symbolic refs parseBranches drops, which is what --count counted', () => {
+    const stdout = record('refs/heads/main', 'main', 'a', '', '', '1', 'T', '*', '', 's')
+      + record('refs/remotes/origin/HEAD', 'origin/HEAD', 'a', '', '', '1', 'T', ' ', 'refs/remotes/origin/main', '')
+    expect(countBranchRecords(stdout)).toBe(2)
+    expect(parseBranches(stdout, new Map())).toHaveLength(1)
+    expect(countBranchRecords('')).toBe(0)
+  })
+})
+
+describe('parseFilterDrivers', () => {
+  it('reads each driver name once, keeping its case and any dots inside it', () => {
+    // `git config --null --get-regexp` output: `<key>\n<value>\0`.
+    const stdout = 'filter.Evil.clean\n/tmp/x\0filter.Evil.process\n/tmp/y\0filter.a.b.clean\ncat\0'
+      + 'extensions.worktreeconfig\ntrue\0'
+    expect(parseFilterDrivers(stdout)).toEqual(['Evil', 'a.b'])
+  })
+
+  it('answers none for empty output', () => {
+    expect(parseFilterDrivers('')).toEqual([])
+  })
+})
+
+describe('worktreeConfigEnabled', () => {
+  it('reads git booleans, a valueless key as true, and the last value as the one in force', () => {
+    expect(worktreeConfigEnabled('extensions.worktreeconfig\ntrue\0')).toBe(true)
+    expect(worktreeConfigEnabled('extensions.worktreeconfig\0')).toBe(true)
+    expect(worktreeConfigEnabled('extensions.worktreeconfig\nYes\0')).toBe(true)
+    expect(worktreeConfigEnabled('extensions.worktreeconfig\ntrue\0extensions.worktreeconfig\nfalse\0')).toBe(false)
+    expect(worktreeConfigEnabled('filter.x.clean\ncat\0')).toBe(false)
+  })
+})
+
+describe('parseContents', () => {
+  it('counts modified, untracked, and ignored entries, and names the ignored ones', () => {
+    const stdout = [
+      '1 .M N... 100644 100644 100644 abc abc README.md',
+      '2 R. N... 100644 100644 100644 abc abc R100 new.md',
+      'old.md',
+      'u UU N... 100644 100644 100644 100644 a b c conflict.txt',
+      '? notes.txt',
+      '! .env',
+      '! build/',
+      '',
+    ].join('\0')
+    expect(parseContents(stdout)).toEqual({
+      modified: 3, untracked: 1, ignored: 2, ignoredPaths: ['.env', 'build/'],
+    })
+  })
+
+  it('keeps counting ignored entries past the sample it names', () => {
+    const stdout = Array.from({ length: IGNORED_SAMPLE + 5 }, (_, index) => `! f${String(index)}`).join('\0')
+    const reading = parseContents(stdout)
+    expect(reading.ignored).toBe(IGNORED_SAMPLE + 5)
+    expect(reading.ignoredPaths).toHaveLength(IGNORED_SAMPLE)
   })
 })

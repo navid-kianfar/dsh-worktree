@@ -5,6 +5,10 @@
  * is what someone opening this list almost always wants. The one exception is a branch already
  * checked out in another worktree — git refuses to check it out twice, so that row jumps to the
  * worktree holding it instead of failing.
+ *
+ * The list is the held reading, which stops at the configured branch ceiling. When it did, typing
+ * also asks the Host for every branch whose name contains the text, and those matches are merged in
+ * — so a branch past the ceiling can be found, and is never offered as "New branch" instead.
  * @module @achasoft/dsh-worktree/client/BranchPanel
  */
 
@@ -15,7 +19,9 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { applyBranchPrefix, checkBranchName } from '../shared/branch-name.ts'
 import { basenameOf } from '../shared/path.ts'
-import type { BranchEntry, OverviewSuccess } from '../host/types.ts'
+import type { BranchEntry, OverviewSuccess, SearchBranchesResult } from '../host/types.ts'
+import { enterAction, mayOfferCreate, mergeMatches, type HostSearch } from './branchSearch.ts'
+import { useBranchSearch } from './useBranchSearch.ts'
 import { RowMenu, type RowMenuItem } from './RowMenu.tsx'
 import { dirtyCount, fuzzyScore, relativeAge, trackingLabel } from './format.ts'
 import { FailureStrip } from './FailureStrip.tsx'
@@ -34,6 +40,11 @@ export interface BranchPanelProps {
   branchPrefix: string
   /** Update remote-tracking refs and prune the ones whose remote branch is gone. */
   onFetch: () => void
+  /**
+   * Ask the Host for every branch whose name contains some text; used only when the reading was
+   * truncated. Must be identity-stable, since the search re-runs when it changes.
+   */
+  onSearch: (query: string, signal: AbortSignal) => Promise<SearchBranchesResult>
   /** Switch onto a branch, creating the local one for a remote row. */
   onCheckout: (branch: string, carryChanges: boolean) => void
   /**
@@ -61,12 +72,16 @@ export interface BranchPanelProps {
 export function BranchPanel(props: BranchPanelProps) {
   const {
     overview, state, t, branchPrefix,
-    onFetch, onCheckout, onCreate, onWorktreeFor, onRename, onDelete, onJump,
+    onFetch, onSearch, onCheckout, onCreate, onWorktreeFor, onRename, onDelete, onJump,
   } = props
   const [query, setQuery] = useState('')
   const [carry, setCarry] = useState(false)
   const now = Date.now()
   const dirty = dirtyCount(overview.repo.dirty)
+  const typed = query.trim()
+  const truncated = overview.branchesTruncated
+
+  const search = useBranchSearch(truncated, query, onSearch)
 
   const matched = useMemo(() => {
     if (query === '') return overview.branches
@@ -76,16 +91,21 @@ export function BranchPanel(props: BranchPanelProps) {
       .sort((left, right) => right.score - left.score)
       .map(scored => scored.entry)
   }, [overview.branches, query])
+  const listed = mergeMatches(matched, search, query)
 
-  const local = matched.filter(entry => entry.kind === 'local')
-  const remote = matched.filter(entry => entry.kind === 'remote')
-  const typed = query.trim()
+  const local = listed.filter(entry => entry.kind === 'local')
+  const remote = listed.filter(entry => entry.kind === 'remote')
   const proposed = applyBranchPrefix(branchPrefix, typed)
-  // The create row is offered only for a name no branch already carries, so the list never shows
-  // "New branch x" beside an existing `x`.
-  const offersCreate = typed !== ''
-    && checkBranchName(proposed).ok
-    && !overview.branches.some(entry => entry.name === proposed || entry.name === typed)
+  // The create row is offered only for a name no branch is known to carry — including, past the
+  // ceiling, the ones the Host search found — so the list never shows "New branch x" beside `x`.
+  const offersCreate = mayOfferCreate({
+    typed,
+    proposed,
+    nameUsable: checkBranchName(proposed).ok,
+    known: [...overview.branches, ...listed],
+    truncated,
+    search,
+  })
 
   const renderRow = (entry: BranchEntry) => {
     const elsewhere = entry.checkedOutAt !== undefined && !entry.current
@@ -190,10 +210,25 @@ export function BranchPanel(props: BranchPanelProps) {
           autoFocus
           onChange={(event) => { setQuery(event.target.value) }}
           onKeyDown={(event) => {
-            if (event.key !== 'Enter') return
-            const first = matched[0]
-            if (first !== undefined && !first.current) onCheckout(first.name, carry)
-            else if (offersCreate) onCreate(proposed)
+            const action = enterAction({
+              key: event.key,
+              isComposing: event.nativeEvent.isComposing,
+              keyCode: event.nativeEvent.keyCode,
+              busy: state.busy,
+              first: listed[0],
+              offersCreate,
+              proposed,
+            })
+            switch (action.kind) {
+              case 'checkout':
+                onCheckout(action.branch, carry)
+                break
+              case 'create':
+                onCreate(action.branch)
+                break
+              case 'none':
+                break
+            }
           }}
         />
       </div>
@@ -223,14 +258,14 @@ export function BranchPanel(props: BranchPanelProps) {
         {remote.length > 0 && <li className={css.groupLabel}>{t('branches.remote')}</li>}
         {remote.map(renderRow)}
 
-        {matched.length === 0 && !offersCreate && (
+        {listed.length === 0 && !offersCreate && search.kind !== 'pending' && (
           <li className={css.empty}>{t('branches.empty')}</li>
         )}
       </ul>
 
-      {overview.branchesTruncated && (
-        <p className={css.notice}>
-          {t('branches.truncated', { count: String(overview.branches.length) })}
+      {truncated && search.kind !== 'done' && (
+        <p className={css.notice} aria-live="polite">
+          {truncatedNotice(search, t, overview.branches.length)}
         </p>
       )}
 
@@ -255,4 +290,21 @@ export function BranchPanel(props: BranchPanelProps) {
       )}
     </>
   )
+}
+
+/**
+ * The notice under a truncated list: what the list is, and what searching is doing about the rest.
+ * @param search - the Host search state.
+ * @param t - the `worktree` namespace translate.
+ * @param count - how many branches the held reading lists.
+ * @returns the sentence to show.
+ */
+function truncatedNotice(search: HostSearch, t: TranslateNS<'worktree'>, count: number): string {
+  switch (search.kind) {
+    case 'pending': return t('branches.searching')
+    case 'failed': return t('branches.searchFailed', { count: String(count) })
+    case 'idle':
+    case 'done':
+      return t('branches.truncated', { count: String(count) })
+  }
 }

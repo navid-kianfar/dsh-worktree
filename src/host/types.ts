@@ -266,6 +266,15 @@ export interface DeleteBranchRequest extends RepoRequest {
   readonly branch: string
   /** Delete even when the branch is not merged into its upstream or into HEAD. */
   readonly force: boolean
+  /**
+   * Delete only while the branch still points at this commit (a full object name).
+   *
+   * For undoing a branch the caller created itself: a branch whose tip is still the commit it was
+   * created at holds no commit of its own, so nothing is lost by deleting it whether or not its start
+   * point is merged — and git's `-d` would refuse exactly that case when the start point is not in
+   * HEAD. When the tip has moved the delete is refused, and {@link force} does not override that.
+   */
+  readonly expectedTip?: string
 }
 
 /** Rename a local branch. */
@@ -317,6 +326,11 @@ export interface AddWorktreeSuccess {
   readonly path: string
   /** Branch checked out there, absent for a detached worktree. */
   readonly branch?: string
+  /**
+   * Full object name of the commit the new worktree's HEAD points at, absent when it could not be
+   * read back. For a created branch this is the tip {@link DeleteBranchRequest.expectedTip} undoes.
+   */
+  readonly sha?: string
   /** git's own summary line. */
   readonly detail: string
 }
@@ -356,7 +370,59 @@ export interface RemoveWorktreeRequest extends RepoRequest {
   readonly path: string
   /** Remove even with uncommitted changes or submodules present. */
   readonly force: boolean
+  /**
+   * Delete the worktree's ignored files with it.
+   *
+   * `git worktree remove` refuses modified and untracked files unless forced, but deletes IGNORED
+   * files — a `.env`, a local build — without a word. So the Host refuses a removal that would take
+   * any ignored file unless the request says so explicitly, forced or not; the browser sets it only
+   * after showing which files would go (see {@link InspectWorktreeRequest}).
+   */
+  readonly discardIgnored?: boolean
 }
+
+/** Read what a worktree holds beyond its commits, before removing it. */
+export interface InspectWorktreeRequest extends RepoRequest {
+  /** Absolute path of the worktree to inspect. */
+  readonly path: string
+}
+
+/** What removing a worktree would delete that no commit keeps. */
+export interface WorktreeContents {
+  readonly ok: true
+  /** Tracked paths with staged, unstaged, or conflicted changes; git refuses an unforced removal over these. */
+  readonly modified: number
+  /** Untracked, not ignored entries; git refuses an unforced removal over these too. */
+  readonly untracked: number
+  /**
+   * Ignored entries, which git deletes even without force. A wholly ignored directory counts once,
+   * the way `git status --ignored` reports it.
+   */
+  readonly ignored: number
+  /** The first ignored entries, relative to the worktree, for the confirmation to name. */
+  readonly ignoredPaths: readonly string[]
+}
+
+/** One worktree inspection, or the reason there is none. */
+export type InspectWorktreeResult = WorktreeContents | GitFailure
+
+/** Find branches by name beyond the ones a capped reading returned. */
+export interface SearchBranchesRequest extends RepoRequest {
+  /** Text the branch's short name must contain, compared case-insensitively. */
+  readonly query: string
+}
+
+/** The branches whose name contains the query. */
+export interface SearchBranchesSuccess {
+  readonly ok: true
+  /** Matching branches, in the same order and shape as {@link OverviewSuccess.branches}. */
+  readonly branches: readonly BranchEntry[]
+  /** True when {@link WorktreeSettings.maxBranches} cut the matches. */
+  readonly truncated: boolean
+}
+
+/** One branch search, or the reason there is none. */
+export type SearchBranchesResult = SearchBranchesSuccess | GitFailure
 
 /** Lock or unlock a worktree against pruning and removal. */
 export interface LockWorktreeRequest extends RepoRequest {

@@ -152,9 +152,20 @@ export function WorktreeSendGate(props: WorktreeSendGateProps) {
 
       const cleanUp = async (workspaceId?: WorkspaceId): Promise<void> => {
         if (workspaceId !== undefined) await deleteWorkspace(workspaceId).catch(() => undefined)
-        // The branch is this gate's own and has no commits yet, so it goes with the worktree.
-        await commands.removeWorktree({ path: created.path, force: false }).catch(() => undefined)
-        await commands.deleteBranch({ branch: created.branch, force: false }).catch(() => undefined)
+        // `discardIgnored`: this worktree was created by this gate moments ago and nothing was sent
+        // from it, so any ignored file in it came from a checkout hook rather than from anyone's work.
+        await commands.removeWorktree({ path: created.path, force: false, discardIgnored: true })
+          .catch(() => undefined)
+        // The branch is this gate's own and has no commits of its own yet, so it goes with the
+        // worktree. Not with a plain `-d`: git refuses that whenever the staged base is not merged
+        // into the project's HEAD, which left the branch behind. The Host force-deletes it only while
+        // its tip is still the commit it was created at — the proof no work is on it — and refuses
+        // otherwise; without a read-back tip, the plain delete is all that is safe to ask for.
+        await commands.deleteBranch({
+          branch: created.branch,
+          force: false,
+          ...created.sha === undefined ? {} : { expectedTip: created.sha },
+        }).catch(() => undefined)
       }
 
       let workspaceId: WorkspaceId
@@ -284,7 +295,8 @@ export function WorktreeSendGate(props: WorktreeSendGateProps) {
  * @param preferred - the name derived from the prompt.
  * @param taken - branch names already known to exist.
  * @param startPoint - the staged base branch, or undefined for the current HEAD.
- * @returns the created worktree's path and branch.
+ * @returns the created worktree's path and branch, and the commit its branch was created at when the
+ * Host read it back.
  * @throws Error with git's message when creation fails for another reason or every attempt is taken.
  */
 async function addWorktreeNamed(
@@ -292,7 +304,7 @@ async function addWorktreeNamed(
   preferred: string,
   taken: ReadonlySet<string>,
   startPoint: string | undefined,
-): Promise<{ path: string, branch: string }> {
+): Promise<{ path: string, branch: string, sha?: string }> {
   const known = new Set(taken)
   let lastMessage = ''
   for (let attempt = 0; attempt < NAME_ATTEMPTS; attempt++) {
@@ -303,7 +315,9 @@ async function addWorktreeNamed(
       ...startPoint === undefined ? {} : { startPoint },
       detach: false,
     })
-    if (created.ok) return { path: created.path, branch: created.branch ?? branch }
+    if (created.ok) {
+      return { path: created.path, branch: created.branch ?? branch, ...created.sha === undefined ? {} : { sha: created.sha } }
+    }
     lastMessage = created.message
     if (!/already exists/iu.test(created.message)) break
     known.add(branch)

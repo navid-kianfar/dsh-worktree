@@ -62,8 +62,17 @@ describe('heroPillState', () => {
     }
   })
 
-  it('keeps loading through a transient first-reading failure, which the next poll may clear', () => {
-    expect(heroPillState({ hasProject: true, view: VIEW, overview: null, failure: failure('timeout') }).kind)
+  it('shows a git error, with its message, for a failed first reading instead of loading forever', () => {
+    for (const code of ['timeout', 'git-failed', 'refused'] as const) {
+      expect(heroPillState({ hasProject: true, view: VIEW, overview: null, failure: failure(code, `${code}!`) }))
+        .toEqual({ kind: 'error', detail: `${code}!` })
+    }
+  })
+
+  it('shows a git error when the capability probe itself failed, and loading while it is still retried', () => {
+    expect(heroPillState({ hasProject: true, view: null, viewError: 'socket closed', overview: null, failure: null }))
+      .toEqual({ kind: 'error', detail: 'socket closed' })
+    expect(heroPillState({ hasProject: true, view: null, viewError: null, overview: null, failure: null }).kind)
       .toBe('loading')
   })
 

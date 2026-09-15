@@ -37,13 +37,15 @@ interface Registration {
  * No `document` on purpose: the bundle installs a `<style>` tag per stylesheet at factory time and
  * guards it with `typeof document !== 'undefined'`, so a context without one proves the guard works
  * as well as keeping this test out of a DOM implementation.
+ * @param localStorage - a storage stand-in to expose as the global, or none.
  * @returns the bundle's exports.
  */
-function loadBundle(): Record<string, unknown> {
+function loadBundle(localStorage?: { removeItem: (key: string) => void }): Record<string, unknown> {
   const source = readFileSync(BUNDLE, 'utf8')
   const nodeRequire = createRequire(import.meta.url)
   let entry: LoaderEntry | undefined
   const sandbox = {
+    ...localStorage === undefined ? {} : { localStorage },
     window: {
       __ModuleLoader__: {
         load(captured: LoaderEntry) { entry = captured },
@@ -146,7 +148,7 @@ describe.skipIf(!built)('the built client bundle', () => {
     return (chip?.options['inject'] as () => Record<string, (...args: never[]) => unknown>)()
   }
 
-  it('registers the chip, the hero toolbar, the send gate, the naming watcher, and the card', async () => {
+  it('registers the chip, the hero toolbar, the send gate, and the card', async () => {
     const captured = await applyBundle()
     const names = captured.map(entry =>
       `${entry.name}#${String(entry.options['id'] ?? entry.options['key'] ?? '')}`)
@@ -154,9 +156,15 @@ describe.skipIf(!built)('the built client bundle', () => {
       'conversation.input.dock#worktree',
       'conversation.hero.workspace#',
       'conversation.input.left#worktree-send-gate',
-      'conversation.session.header.utilities#worktree-naming',
       'settings.plugin.item#worktree',
     ])
+  })
+
+  it('removes the legacy worktree-intent record once on load', async () => {
+    const removed: string[] = []
+    const bundle = loadBundle({ removeItem: (key: string) => { removed.push(key) } })
+    await (bundle['apply'] as (ctx: unknown) => Promise<void>)(fakeContext(registrations))
+    expect(removed).toEqual(['dsh.worktree.intents.v1'])
   })
 
   it('puts the chip above the composer and nowhere in the session header', async () => {
@@ -165,9 +173,9 @@ describe.skipIf(!built)('the built client bundle', () => {
     expect(chips.map(entry => entry.name)).toEqual(['conversation.input.dock'])
     // After the core todo (0) and queue (20) dock entries, so it is the row touching the composer.
     expect(chips[0]?.options['order']).toBeGreaterThan(20)
-    // The only header occupant left is the naming watcher, which renders nothing.
+    // Nothing is left in the session header: the naming watcher that sat there is gone.
     const header = captured.filter(entry => entry.name.startsWith('conversation.session.header'))
-    expect(header.map(entry => entry.options['id'])).toEqual(['worktree-naming'])
+    expect(header).toEqual([])
   })
 
   it('takes the hero picker seat below the core registration', async () => {
@@ -192,7 +200,6 @@ describe.skipIf(!built)('the built client bundle', () => {
     // The two git seats bind operations; the card owns settings instead and gets no command set.
     for (const key of [
       'conversation.input.dock#worktree',
-      'conversation.session.header.utilities#worktree-naming',
       'conversation.input.left#worktree-send-gate',
     ]) {
       expect(faces.get(key), key).toMatchObject({ commandsFor: expect.any(Function) })
@@ -223,7 +230,7 @@ describe.skipIf(!built)('the built client bundle', () => {
     expect(() => { gate['notify']?.('s1', 'failed') }).not.toThrow()
     expect(faces.get('settings.plugin.item#worktree')).toMatchObject({
       hooks: expect.any(Object),
-      setField: expect.any(Function),
+      setFields: expect.any(Function),
     })
   })
 

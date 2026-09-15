@@ -22,7 +22,7 @@ export type BranchNameProblem =
   | 'sequence'
   /** A component starts with `.`, or ends with `.` or `.lock`. */
   | 'component'
-  /** Begins or ends with `/`, or is exactly `@` or `HEAD`. */
+  /** Begins with `-`, begins or ends with `/`, or is exactly `@` or `HEAD`. */
   | 'shape'
 
 /** A branch name's verdict. */
@@ -43,6 +43,11 @@ const FORBIDDEN = /[\u0000-\u0020\u007f~^:?*[\\]/u
  */
 export function checkBranchName(name: string): BranchNameVerdict {
   if (name === '') return { ok: false, problem: 'empty' }
+  // `git check-ref-format --branch` refuses a leading dash, and for a reason that matters more here
+  // than anywhere: a branch name travels as its own argv entry, and `-f` or `-D` in that position is
+  // an option to `git branch`, not a name — renaming `feature` to `-f` would force-rename the
+  // current branch over `feature`. The Host refuses it on this rule before any argument list exists.
+  if (name.startsWith('-')) return { ok: false, problem: 'shape' }
   if (name.startsWith('/') || name.endsWith('/')) return { ok: false, problem: 'shape' }
   // `HEAD` is refused alongside `@` because `git switch` would read it as the symbolic ref rather
   // than as a branch, which makes every later operation on the branch ambiguous.

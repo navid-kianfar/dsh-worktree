@@ -1,7 +1,7 @@
 /**
- * The injected business faces of this plugin's two seats.
+ * The injected business faces of this plugin's seats.
  *
- * Both are declared here rather than beside their components, because the registrations in
+ * They are declared here rather than beside their components, because the registrations in
  * `./index.ts` build them and every component in the surface consumes them: one home keeps the two
  * sides of each face from drifting.
  * @module @achasoft/dsh-worktree/client/contract
@@ -11,9 +11,11 @@ import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type { WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
   AddWorktreeRequest, AddWorktreeResult, CheckoutRequest, CreateBranchRequest, DeleteBranchRequest,
-  LockWorktreeRequest, MutationResult, OverviewResult, RemoveWorktreeRequest, RenameBranchRequest,
-  SuggestBranchNameResult, SuggestPathResult, WorktreeSettings, WorktreeView,
+  InspectWorktreeResult, LockWorktreeRequest, MutationResult, OverviewResult, RemoveWorktreeRequest,
+  RenameBranchRequest, SearchBranchesResult, SuggestBranchNameResult, SuggestPathResult, WorktreeSettings,
+  WorktreeView,
 } from '../host/types.ts'
+import type { FieldWrite } from './settingsWrites.ts'
 
 /** Every git operation the surface can start, with the workspace path already bound. */
 export interface WorktreeCommands {
@@ -23,6 +25,13 @@ export interface WorktreeCommands {
    * @returns the reading, or a classified failure.
    */
   overview: (signal?: AbortSignal) => Promise<OverviewResult>
+  /**
+   * Find branches whose name contains some text, past the ceiling {@link overview} is cut at.
+   * @param query - the text to search for.
+   * @param signal - abandons the search when the typed text moves on.
+   * @returns the matching branches, or a classified failure.
+   */
+  searchBranches: (query: string, signal?: AbortSignal) => Promise<SearchBranchesResult>
   /**
    * Update remote-tracking refs and drop the ones whose remote branch is gone.
    * @returns git's summary, or a classified failure.
@@ -71,6 +80,13 @@ export interface WorktreeCommands {
    * @returns git's summary, or a classified failure.
    */
   removeWorktree: (request: Omit<RemoveWorktreeRequest, 'workspacePath'>) => Promise<MutationResult>
+  /**
+   * Report what removing a worktree would delete that no commit keeps.
+   * @param path - the worktree directory.
+   * @param signal - abandons the reading when the confirmation closes.
+   * @returns the counts and the first ignored entries, or a classified failure.
+   */
+  inspectWorktree: (path: string, signal?: AbortSignal) => Promise<InspectWorktreeResult>
   /**
    * Lock or unlock a worktree.
    * @param request - the worktree path, the target state, and an optional lock reason.
@@ -169,7 +185,32 @@ export interface WorktreeHeroInjected {
  * draft), the composer block that stops input while the worktree is made, the composer's notice line
  * for a failure, and removing a Workspace again when an attempt is rolled back.
  */
-export interface WorktreeSendGateInjected extends WorktreeNamingInjected {
+export interface WorktreeSendGateInjected {
+  /**
+   * Read the capability view, which carries the branch prefix the name is completed with.
+   * @param signal - abandons the probe.
+   * @returns the capability view.
+   */
+  describeWorktree: (signal?: AbortSignal) => Promise<WorktreeView>
+  /**
+   * Bind every git operation to one workspace directory.
+   * @param workspacePath - the workspace's canonical directory.
+   * @returns the bound command set.
+   */
+  commandsFor: (workspacePath: string) => WorktreeCommands
+  /**
+   * Rename a Workspace's display title, so the switcher shows the branch rather than the directory.
+   * @param workspaceId - the Workspace to rename.
+   * @param title - the new title.
+   * @returns settlement after the Host accepts it.
+   */
+  renameWorkspace: (workspaceId: WorkspaceId, title: string) => Promise<void>
+  /**
+   * Ask the Host's model for a branch name describing one prompt.
+   * @param prompt - the prompt to name from.
+   * @returns the suggestion, or a classified failure.
+   */
+  suggestBranchName: (prompt: string) => Promise<SuggestBranchNameResult>
   /**
    * Adopt a directory as a Workspace.
    * @param path - absolute directory.
@@ -208,41 +249,6 @@ export interface WorktreeSendGateInjected extends WorktreeNamingInjected {
   notify: (sessionId: string, text: string) => void
 }
 
-/**
- * Injected business face of the session header's naming watcher.
- *
- * Its own face rather than the chip's because it is a different job on the same repository: the chip
- * shows and switches, this one renames the branch a new-session worktree was created on.
- */
-export interface WorktreeNamingInjected {
-  /**
-   * Read the capability view, which carries the branch prefix the name is completed with.
-   * @param signal - abandons the probe when the seat unmounts.
-   * @returns the capability view.
-   */
-  describeWorktree: (signal?: AbortSignal) => Promise<WorktreeView>
-  /**
-   * Bind every git operation to one workspace directory.
-   * @param workspacePath - the workspace's canonical directory.
-   * @returns the bound command set.
-   */
-  commandsFor: (workspacePath: string) => WorktreeCommands
-  /**
-   * Rename a Workspace's display title, so the switcher shows the branch rather than the directory
-   * the provisional name produced.
-   * @param workspaceId - the Workspace to rename.
-   * @param title - the new title.
-   * @returns settlement after the Host accepts it.
-   */
-  renameWorkspace: (workspaceId: WorkspaceId, title: string) => Promise<void>
-  /**
-   * Ask the Host's model for a branch name describing one prompt.
-   * @param prompt - the prompt to name from.
-   * @returns the suggestion, or a classified failure.
-   */
-  suggestBranchName: (prompt: string) => Promise<SuggestBranchNameResult>
-}
-
 /** Injected business face of the worktree settings card. */
 export interface WorktreeSettingsInjected {
   /** Registrant-private reactive sources the renderer binds to `use<Name>` hooks. */
@@ -257,10 +263,11 @@ export interface WorktreeSettingsInjected {
    */
   describeWorktree: (signal?: AbortSignal) => Promise<WorktreeView>
   /**
-   * Store one field of the `worktree` section; the bound scope owns revision fencing.
-   * @param field - the field name inside the namespace.
-   * @param value - the JSON-shaped value the control produced.
-   * @returns settlement after the write.
+   * Store fields of the `worktree` section, in the order given; the bound scope owns revision
+   * fencing. Several fields go to the Host as one mutation where the scope supports it.
+   * @param writes - the fields and values, a dependent field before the field it depends on.
+   * @returns settlement after the write; rejects when the Host did not store what was written (see
+   * `./settingsWrites.ts`) or the write did not reach it.
    */
-  setField: (field: string, value: unknown) => Promise<void>
+  setFields: (writes: readonly FieldWrite[]) => Promise<void>
 }

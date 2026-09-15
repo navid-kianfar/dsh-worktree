@@ -13,7 +13,10 @@
  * prefix hold a local draft while they are typed, because an intermediate keystroke of either is a
  * value the Host would reject or act on surprisingly. Every other control's rejection is prevented
  * the same way — a number below its floor is not sent, and a switch the Host refuses in combination
- * clears its dependent in the same gesture — so no control can leave a rejected write on screen.
+ * clears its dependent FIRST, in the same gesture. What prevention still misses (another tab's
+ * change, a Host rule this card does not mirror) is not lost either: the bound scope resolves even
+ * when the Host refuses a write, so every write is verified against the stored value and a refusal
+ * is shown at the top of the card (see `./settingsWrites.ts`).
  * @module @achasoft/dsh-worktree/client/WorktreeSettingsCard
  */
 
@@ -25,6 +28,7 @@ import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type { WorktreeView } from '../host/types.ts'
 import type { WorktreeSettingsInjected } from './contract.ts'
+import { registerWorkspaceWrites, type FieldWrite } from './settingsWrites.ts'
 import css from './WorktreeSettingsCard.module.css'
 
 /** Props the renderer binds for the worktree settings card. */
@@ -120,10 +124,11 @@ function templateNamesBranch(template: string): boolean {
  * @returns the card.
  */
 export function WorktreeSettingsCard(props: WorktreeSettingsCardProps) {
-  const { t, setField, describeWorktree } = props
+  const { t, setFields, describeWorktree } = props
   const settings = props.useWorktreeSettings(snapshot => snapshot)
   const [capability, setCapability] = useState<WorktreeView | null>(null)
   const [open, setOpen] = useState(false)
+  const [writeError, setWriteError] = useState<string | null>(null)
   const fieldId = useId()
   const value = settings.value
   const disabled = !settings.writable || value === undefined
@@ -139,21 +144,34 @@ export function WorktreeSettingsCard(props: WorktreeSettingsCardProps) {
     return () => { controller.abort() }
   }, [describeWorktree])
 
+  /**
+   * Store writes and put a refusal on screen instead of dropping it.
+   * @param writes - the fields to store, dependent fields first.
+   */
+  const write = (writes: readonly FieldWrite[]): void => {
+    setWriteError(null)
+    setFields(writes).catch((reason: unknown) => {
+      setWriteError(reason instanceof Error ? reason.message : String(reason))
+    })
+  }
+
   const [template, setTemplate] = useDebouncedText(
     value?.worktreePathTemplate ?? '',
-    next => { void setField('worktreePathTemplate', next) },
+    next => { write([['worktreePathTemplate', next]]) },
     templateNamesBranch,
   )
   const [prefix, setPrefix] = useDebouncedText(
     value?.branchPrefix ?? '',
-    next => { void setField('branchPrefix', next) },
+    next => { write([['branchPrefix', next]]) },
   )
   const templateInvalid = !templateNamesBranch(template)
 
   /** Store a seconds-valued control as the milliseconds the section is spelled in. */
-  const setSeconds = (field: string, raw: string, floor: number): void => {
+  const setSeconds = (
+    field: 'refreshIntervalMs' | 'gitTimeoutMs' | 'networkTimeoutMs', raw: string, floor: number,
+  ): void => {
     const seconds = Number(raw)
-    if (Number.isSafeInteger(seconds) && seconds >= floor) void setField(field, seconds * 1_000)
+    if (Number.isSafeInteger(seconds) && seconds >= floor) write([[field, seconds * 1_000]])
   }
 
   return (
@@ -175,6 +193,9 @@ export function WorktreeSettingsCard(props: WorktreeSettingsCardProps) {
 
       {open && (
         <div className={css.body}>
+          {writeError !== null && (
+            <p className={css.invalid} role="alert">{t('settings.writeRefused', { reason: writeError })}</p>
+          )}
           <div className={css.group}>
             <Field
               id={`${fieldId}-git`}
@@ -203,7 +224,7 @@ export function WorktreeSettingsCard(props: WorktreeSettingsCardProps) {
                   role="switch"
                   disabled={disabled}
                   checked={value?.showChip ?? true}
-                  onChange={(event) => { void setField('showChip', event.target.checked) }}
+                  onChange={(event) => { write([['showChip', event.target.checked]]) }}
                 />
               )}
               hint={t('settings.showChip.hint')}
@@ -264,11 +285,9 @@ export function WorktreeSettingsCard(props: WorktreeSettingsCardProps) {
                   disabled={disabled}
                   checked={value?.registerWorkspace ?? true}
                   onChange={(event) => {
-                    const next = event.target.checked
-                    void setField('registerWorkspace', next)
-                    // The Host refuses the combination outright, so the dependent flag is cleared in
-                    // the same gesture rather than left to fail the next write.
-                    if (!next && value?.openSession === true) void setField('openSession', false)
+                    // The Host refuses the combination outright and validates after every write, so
+                    // the dependent flag is cleared in the same gesture and BEFORE registration.
+                    write(registerWorkspaceWrites(event.target.checked, value?.openSession))
                   }}
                 />
               )}
@@ -286,7 +305,7 @@ export function WorktreeSettingsCard(props: WorktreeSettingsCardProps) {
                   role="switch"
                   disabled={disabled || value?.registerWorkspace === false}
                   checked={value?.openSession ?? true}
-                  onChange={(event) => { void setField('openSession', event.target.checked) }}
+                  onChange={(event) => { write([['openSession', event.target.checked]]) }}
                 />
               )}
               hint={t('settings.openSession.hint')}
@@ -306,7 +325,7 @@ export function WorktreeSettingsCard(props: WorktreeSettingsCardProps) {
                   role="switch"
                   disabled={disabled}
                   checked={value?.includeRemoteBranches ?? true}
-                  onChange={(event) => { void setField('includeRemoteBranches', event.target.checked) }}
+                  onChange={(event) => { write([['includeRemoteBranches', event.target.checked]]) }}
                 />
               )}
               hint={t('settings.includeRemote.hint')}
@@ -327,7 +346,7 @@ export function WorktreeSettingsCard(props: WorktreeSettingsCardProps) {
                     const next = Number(event.target.value)
                     // A non-integer or zero entry is refused here rather than sent: the Host schema
                     // would reject it, and a rejected write leaves the field looking accepted.
-                    if (Number.isSafeInteger(next) && next >= 1) void setField('maxBranches', next)
+                    if (Number.isSafeInteger(next) && next >= 1) write([['maxBranches', next]])
                   }}
                 />
               )}
@@ -413,7 +432,7 @@ export function WorktreeSettingsCard(props: WorktreeSettingsCardProps) {
                   role="switch"
                   disabled={disabled}
                   checked={value?.confirmDestructive ?? true}
-                  onChange={(event) => { void setField('confirmDestructive', event.target.checked) }}
+                  onChange={(event) => { write([['confirmDestructive', event.target.checked]]) }}
                 />
               )}
               hint={t('settings.confirmDestructive.hint')}

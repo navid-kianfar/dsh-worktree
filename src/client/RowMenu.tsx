@@ -27,8 +27,10 @@ export interface RowMenuItem {
   readonly onSelect: () => void
   /** Render in the destructive tint. */
   readonly danger?: boolean
-  /** Present but unusable, with the reason as its title. */
+  /** Present but unusable. */
   readonly disabled?: boolean
+  /** Why the entry is unusable, shown as its tooltip; only read while {@link disabled}. */
+  readonly reason?: string
 }
 
 /** Gap between the trigger and the menu, matching the popover's own offset from the chip. */
@@ -143,6 +145,7 @@ export function RowMenu({ label, items }: { label: string; items: readonly RowMe
               role="menuitem"
               className={item.danger === true ? css.menuItemDanger : css.menuItem}
               disabled={item.disabled === true}
+              {...item.disabled === true && item.reason !== undefined ? { title: item.reason } : {}}
               onClick={(event) => {
                 event.stopPropagation()
                 setOpen(false)

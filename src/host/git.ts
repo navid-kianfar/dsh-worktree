@@ -28,6 +28,20 @@ const VERSION = /\bversion (\d+)\.(\d+)/u
 /** The one diagnostic for a Host whose PATH holds no git. */
 const NO_GIT = 'git is not installed, or not on this Host process PATH'
 
+/**
+ * Configuration every invocation this client makes is run under, ahead of the subcommand.
+ *
+ * `core.fsmonitor` names a program git runs whenever it consults the index — `status`, `switch`,
+ * `worktree add` — and it is read from the repository's own `.git/config`. This surface reads a
+ * repository the moment a folder is selected and again on every poll, so honouring it would let a
+ * folder someone merely opened execute a program of its choosing. Switching it off costs only the
+ * speed-up a monitor gives, and it is passed on the command line because that scope outranks every
+ * config file and is inherited by any git process git itself spawns (a submodule's, for instance).
+ * Filter drivers are the other program a reading can reach; `WorktreeOperations` neutralises those
+ * per repository, because their names are only known once the repository's config has been read.
+ */
+const INVOCATION_CONFIG: readonly string[] = Object.freeze(['-c', 'core.fsmonitor=false'])
+
 /** Compose one classified failure. */
 export function fail(code: GitFailureCode, message: string): GitFailure {
   return { ok: false, code, message }
@@ -185,7 +199,7 @@ export class GitClient {
     await this.probeVersion(executable, cwd, signal)
     const settings = this.source()
     return runCommand(this.ctx, {
-      argv: [executable, ...argv],
+      argv: [executable, ...INVOCATION_CONFIG, ...argv],
       cwd,
       timeoutMs: options.network === true ? settings.networkTimeoutMs : settings.gitTimeoutMs,
       maxBytes: settings.maxOutputBytes,
@@ -235,6 +249,10 @@ export class GitClient {
    * @param executable - the resolved git path.
    * @param cwd - an existing directory in the backend's execution world to run the probe in.
    * @param signal - cancellation for the probe.
+   * @throws {Error} when the probe did not produce a reading — cancelled, timed out, or killed.
+   * Throwing rather than returning is what lets {@link probeVersion} drop the memo: a probe that
+   * resolved without a reading would stay memoized, and the NUL-separated listing would then stay
+   * off for the life of the process because of one abandoned request.
    */
   private async readVersion(executable: string, cwd: string, signal?: AbortSignal): Promise<void> {
     const settings = this.source()
@@ -246,8 +264,9 @@ export class GitClient {
       graceMs: settings.graceMs,
       env: { LC_ALL: 'C' },
     }, signal)
-    /* v8 ignore next 3 -- a git that resolved but cannot report its own version needs a broken install. */
-    if (outcome.exitCode !== 0) return
+    if (outcome.exitCode !== 0 || outcome.timedOut || outcome.aborted) {
+      throw new Error(classify(outcome).message)
+    }
     this.version = outcome.stdout.trim()
     const parsed = VERSION.exec(this.version)
     if (parsed !== null) this.release = [Number(parsed[1]), Number(parsed[2])]

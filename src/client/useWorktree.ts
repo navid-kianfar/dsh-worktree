@@ -8,9 +8,10 @@
  * @module @achasoft/dsh-worktree/client/useWorktree
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import type { GitFailure, OverviewSuccess, WorktreeView } from '../host/types.ts'
 import type { WorktreeCommands, WorktreeChipInjected } from './contract.ts'
+import { NO_FAILURES, reduceFailures, retryDelayMs, shownFailure } from './failures.ts'
 
 /** Failures that will not clear on their own, so the chip stops polling against them. */
 const TERMINAL_CODES: ReadonlySet<string> = new Set([
@@ -21,10 +22,18 @@ const TERMINAL_CODES: ReadonlySet<string> = new Set([
 export interface WorktreeState {
   /** The capability view, or null before the first probe answers. */
   readonly view: WorktreeView | null
+  /** Why the capability probe failed, while it is being retried and no view has been read. */
+  readonly viewError: string | null
   /** The most recent successful reading, kept across a transient failure. */
   readonly overview: OverviewSuccess | null
-  /** The failure of the last reading or mutation, cleared by the next success. */
+  /**
+   * The failure to show: the last mutation's refusal while it stands, otherwise the last reading's
+   * failure. A refusal is kept until the person acts — {@link clearFailure} or another mutation —
+   * so a background reading's success does not wipe it; see `./failures.ts`.
+   */
   readonly failure: GitFailure | null
+  /** The last reading's failure alone, which is what decides whether the surface can draw at all. */
+  readonly readFailure: GitFailure | null
   /** True while a reading or a mutation is in flight. */
   readonly busy: boolean
   /** Re-read the repository now. */
@@ -37,7 +46,7 @@ export interface WorktreeState {
    * Host produced — the path git settled a new worktree on, for instance.
    */
   readonly run: <T extends { ok: true }>(operation: () => Promise<T | GitFailure>) => Promise<T | null>
-  /** Drop the current failure without re-reading — what a dialog's Cancel does. */
+  /** Drop a mutation's refusal without re-reading — what closing a dropdown or a dialog's Cancel does. */
   readonly clearFailure: () => void
 }
 
@@ -52,9 +61,14 @@ export function useWorktree(
   commands: WorktreeCommands | null,
 ): WorktreeState {
   const [view, setView] = useState<WorktreeView | null>(null)
+  const [viewError, setViewError] = useState<string | null>(null)
   const [overview, setOverview] = useState<OverviewSuccess | null>(null)
-  const [failure, setFailure] = useState<GitFailure | null>(null)
+  const [failures, dispatch] = useReducer(reduceFailures, NO_FAILURES)
   const [busy, setBusy] = useState(false)
+  // How many readings in a row have failed with nothing read; paces the retry below.
+  const readRetries = useRef(0)
+  // Whether a reading of the current directory is held, read from inside the reading's callbacks.
+  const hasReading = useRef(false)
   // Bumping this re-runs the reading effect, which is what makes an explicit refresh and a
   // post-mutation refresh the same code path rather than two.
   const [generation, setGeneration] = useState(0)
@@ -70,14 +84,28 @@ export function useWorktree(
 
   useEffect(() => {
     const controller = new AbortController()
-    void describeWorktree(controller.signal).then((next) => {
-      if (alive()) setView(next)
-    }, () => {
-      // A failed probe leaves `view` null, which renders exactly like a deployment that switched the
-      // chip off: nothing at all. There is no partial state worth showing from a Host that did not
-      // answer what this surface is allowed to draw.
-    })
-    return () => { controller.abort() }
+    let attempt = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const probe = (): void => {
+      void describeWorktree(controller.signal).then((next) => {
+        if (!alive() || controller.signal.aborted) return
+        setView(next)
+        setViewError(null)
+      }, (reason: unknown) => {
+        if (!alive() || controller.signal.aborted) return
+        // A probe that failed once is asked again, with backoff: without a view nothing here draws,
+        // so a single dropped request used to leave the pill "loading" and the row hidden for the
+        // life of the page. The reason is kept for the pill to show while the retry waits.
+        setViewError(reason instanceof Error ? reason.message : String(reason))
+        timer = setTimeout(probe, retryDelayMs(attempt))
+        attempt += 1
+      })
+    }
+    probe()
+    return () => {
+      controller.abort()
+      clearTimeout(timer)
+    }
   }, [describeWorktree])
 
   // The command set the held reading was taken with. A new set means a different directory, and a
@@ -91,7 +119,9 @@ export function useWorktree(
   if (readFor !== commands) {
     setReadFor(commands)
     setOverview(null)
-    setFailure(null)
+    dispatch({ kind: 'reset' })
+    readRetries.current = 0
+    hasReading.current = false
   }
 
   useEffect(() => {
@@ -103,27 +133,53 @@ export function useWorktree(
       setBusy(false)
       if (result.ok) {
         setOverview(result)
-        setFailure(null)
+        dispatch({ kind: 'read-succeeded' })
+        readRetries.current = 0
+        hasReading.current = true
         return
       }
       // The previous reading stays on screen through a transient failure: a timeout clears on the
       // next poll, and blanking the chip for it would be a worse answer than a slightly stale one.
-      setFailure(result)
-      if (TERMINAL_CODES.has(result.code)) setOverview(null)
-    }, () => {
-      // A transport failure is not a git failure. The reading is left as it was and the next poll
-      // decides; surfacing it would put a wire error where a repository error belongs.
-      if (alive() && !controller.signal.aborted) setBusy(false)
+      dispatch({ kind: 'read-failed', failure: result })
+      if (TERMINAL_CODES.has(result.code)) {
+        setOverview(null)
+        hasReading.current = false
+      }
+    }, (reason: unknown) => {
+      if (!alive() || controller.signal.aborted) return
+      setBusy(false)
+      // A transport failure is not a git failure. With a reading on screen it is left as it was and
+      // the next poll decides; surfacing it would put a wire error where a repository error belongs.
+      // With nothing read yet it is the only answer there is, and holding "loading" over it would
+      // never end — so it becomes a reading failure, which is shown and retried.
+      if (hasReading.current) return
+      dispatch({
+        kind: 'read-failed',
+        failure: { ok: false, code: 'git-failed', message: reason instanceof Error ? reason.message : String(reason) },
+      })
     })
     return () => { controller.abort() }
   }, [commands, generation])
 
   const refresh = useCallback((): void => { setGeneration(current => current + 1) }, [])
-  const clearFailure = useCallback((): void => { setFailure(null) }, [])
+  const clearFailure = useCallback((): void => { dispatch({ kind: 'dismissed' }) }, [])
 
   // Polling stops on a terminal failure: a workspace that is not a repository stays not a
   // repository, and re-asking every interval spends a request forever to be told the same thing.
-  const halted = failure !== null && TERMINAL_CODES.has(failure.code)
+  const readFailure = failures.reading
+  const halted = readFailure !== null && TERMINAL_CODES.has(readFailure.code)
+
+  // A failed FIRST reading is retried on its own schedule, with backoff. The poll below would retry
+  // it too, but only when a cadence is configured — with `refreshIntervalMs: 0` the pill would show
+  // its error until the page reloaded. Once a reading has landed, the poll is what refreshes it.
+  const retrying = commands !== null && readFailure !== null && !halted && overview === null
+  useEffect(() => {
+    if (!retrying) return undefined
+    const timer = setTimeout(refresh, retryDelayMs(readRetries.current))
+    readRetries.current += 1
+    return () => { clearTimeout(timer) }
+  }, [retrying, readFailure, refresh])
+
   const interval = view?.refreshIntervalMs ?? 0
   useEffect(() => {
     if (commands === null || halted || interval <= 0) return undefined
@@ -135,17 +191,18 @@ export function useWorktree(
     operation: () => Promise<T | GitFailure>,
   ): Promise<T | null> => {
     setBusy(true)
+    dispatch({ kind: 'mutation-started' })
     try {
       const result = await operation()
       if (!result.ok) {
         if (alive()) {
-          setFailure(result)
+          dispatch({ kind: 'mutation-failed', failure: result })
           setBusy(false)
         }
         return null
       }
       if (alive()) {
-        setFailure(null)
+        dispatch({ kind: 'mutation-succeeded' })
         // Refresh rather than patching the held reading: a checkout moves HEAD, changes which
         // branch each worktree holds, and can change what is uncommitted — re-reading is the only
         // way the three stay one consistent picture.
@@ -154,10 +211,9 @@ export function useWorktree(
       return result
     } catch (error) {
       if (alive()) {
-        setFailure({
-          ok: false,
-          code: 'git-failed',
-          message: error instanceof Error ? error.message : String(error),
+        dispatch({
+          kind: 'mutation-failed',
+          failure: { ok: false, code: 'git-failed', message: error instanceof Error ? error.message : String(error) },
         })
         setBusy(false)
       }
@@ -165,5 +221,7 @@ export function useWorktree(
     }
   }, [refresh])
 
-  return { view, overview, failure, busy, refresh, run, clearFailure }
+  return {
+    view, viewError, overview, failure: shownFailure(failures), readFailure, busy, refresh, run, clearFailure,
+  }
 }
