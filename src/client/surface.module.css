@@ -1,53 +1,77 @@
-/* The worktree surface: the session-header chip, its two popovers, and the dialogs they open.
+/* The worktree surface: the branch and worktree row above the composer, its two popovers, and the
+ * dialogs they open — plus the new-session pill and the searchable picker further down.
  *
- * One stylesheet for all four, because they are one control — the popovers inherit the chip's
+ * One stylesheet for all of it, because they are one control — the popovers inherit the row's
  * geometry and the dialogs reuse the popovers' rows. Every color is a `--dsw-*` token, so the whole
  * surface follows the theme without a single literal. */
 
-/* --- chip --- */
+/* --- row above the composer --- */
 
+/* A slim, left-aligned row of its own in the input dock. The dock stack spans the whole conversation
+   column while the composer card is centered at its own width, so the row takes the card's column
+   from the shell's composer tokens — the same geometry the core todo and queue docks use — and the
+   pill lines up with the card's left edge, just inside its rounding. The fallbacks are the shell's
+   defaults, for a harness that does not publish the tokens. */
 .root {
   position: relative;
-  display: inline-flex;
+  box-sizing: border-box;
+  display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 6px;
+  width: calc(100% - 2 * var(--dsh-composer-side-clearance, 16px));
+  max-width: var(--dsh-composer-card-max-width, 712px);
+  min-width: 0;
+  margin: 0 auto;
+  padding: 0 var(--dsh-composer-dock-inset, 8px);
 }
 
-/* The segmented pill: two buttons sharing one border, divided by a hairline. */
+/* The segmented pill, measured like the new-session `.heroPill` (28px tall, 16px radius, 13px/20px
+   medium labels, one border-l2 hairline) so the control does not change shape when the session
+   starts. Unlike the hero pill it is filled with the page ground: the transcript scrolls under the
+   composer's fade, and an unfilled pill would print over the last message's text. */
 .pill {
   display: inline-flex;
-  align-items: stretch;
-  height: 28px;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  min-height: 28px;
   border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 999px;
-  background: var(--dsw-alias-bg-layer-3);
-  overflow: hidden;
+  border-radius: 16px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
 }
 
 .segment {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  min-width: 0;
   max-width: 220px;
-  padding: 0 10px;
+  min-height: 26px;
+  padding: 0 8px;
   border: none;
   background: transparent;
-  color: var(--dsw-alias-label-secondary);
+  color: inherit;
   font: inherit;
-  font-size: 12px;
-  line-height: 26px;
   white-space: nowrap;
   cursor: pointer;
 }
 
-.segment:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
+.segment:first-child {
+  border-radius: 16px 0 0 16px;
 }
 
+.segment:last-child {
+  border-radius: 0 16px 16px 0;
+}
+
+.segment:hover:not(:disabled),
 .segment[aria-expanded='true'] {
-  background: var(--dsw-alias-interactive-bg-active);
-  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .segment:focus-visible {
@@ -60,18 +84,22 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-.segmentDivider {
-  composes: segment;
-  border-left: 1px solid var(--dsw-alias-border-l2);
+/* The same short hairline the new-session pill divides its halves with. */
+.pillDivider {
+  flex: none;
+  width: 1px;
+  height: 14px;
+  background: var(--dsw-alias-border-l2);
 }
 
 .segmentIcon {
   flex: none;
   display: inline-flex;
-  color: var(--dsw-alias-label-tertiary);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .segmentText {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -79,6 +107,8 @@
 /* Ahead/behind sits beside the branch name in the same tabular figures the panels use. */
 .segmentTrack {
   flex: none;
+  font-size: 12px;
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
   color: var(--dsw-alias-label-tertiary);
 }
@@ -115,8 +145,8 @@
   height: 28px;
   padding: 0;
   border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
-  background: var(--dsw-alias-bg-layer-3);
+  border-radius: 16px;
+  background: var(--dsw-alias-bg-base);
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
 }
@@ -138,10 +168,13 @@
 
 /* --- popover --- */
 
+/* Opens UPWARD from the row: the row sits on the composer, so there is no room below. Left-aligned
+   with the row's pill. The component caps `max-height` at the room above the row, and the list is
+   the part that gives way (see `.list`), so the head and footer stay reachable on a short window. */
 .panel {
   position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
+  bottom: calc(100% + 8px);
+  left: var(--dsh-composer-dock-inset, 8px);
   z-index: 100;
   box-sizing: border-box;
   display: flex;
@@ -156,7 +189,15 @@
   line-height: 20px;
   color: var(--dsw-alias-label-secondary);
   cursor: default;
-  overflow: hidden;
+  /* Scrolls as a whole only when even the shrunken list leaves the head and footer no room — a
+     window too short for the popover at all — so nothing is ever cut off unreachably. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-color: var(--dsw-alias-scrollbar-bg-l1) transparent;
+}
+
+.panel > * {
+  flex: none;
 }
 
 .panelHead {
@@ -248,6 +289,13 @@
   max-height: 320px;
   overflow-y: auto;
   scrollbar-color: var(--dsw-alias-scrollbar-bg-l1) transparent;
+}
+
+/* Out-specifies `.panel > *`: the list is the one part that shrinks when the popover is capped by the
+   room above the row, and it keeps enough height to show that it scrolls. */
+.panel > .list {
+  flex: 0 1 auto;
+  min-height: 48px;
 }
 
 .groupLabel {
@@ -853,6 +901,54 @@
   margin: 0;
   accent-color: var(--dsw-alias-brand-primary);
   cursor: pointer;
+}
+
+.heroCheckBox:disabled {
+  cursor: default;
+}
+
+/* The inert pill: the same box as `.heroPill`, holding its place while the first reading lands
+   (loading) or when the project cannot have one (disabled). Its halves are not buttons, so they take
+   the live halves' geometry without their hover. */
+.heroPillLoading,
+.heroPillDisabled {
+  composes: heroPill;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: default;
+}
+
+.heroPillDisabled:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+.heroPillLoading .heroIcon,
+.heroPillDisabled .heroIcon {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.heroPillStatic,
+.heroPillStaticCheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.heroPillStaticCheck {
+  gap: 6px;
+}
+
+/* Stands in for the branch name at about a short name's width, so the pill barely moves when the
+   real one arrives. A flat bar, not a shimmer: it is gone in one request. */
+.heroPlaceholder {
+  display: inline-block;
+  width: 44px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--dsw-alias-bg-module-platform);
 }
 
 .heroError {

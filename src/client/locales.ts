@@ -1,4 +1,4 @@
-/** `worktree` namespace dictionaries (the session-header chip, both switchers, and the settings card). */
+/** `worktree` namespace dictionaries (the branch and worktree control, both switchers, and the settings card). */
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
@@ -18,6 +18,11 @@ export const zh = {
   'hero.branch.base.tooltip': '选择新工作树的起始分支',
   'hero.worktree': '工作树',
   'hero.worktree.tooltip': '发送第一条消息时，从 {branch} 创建一个新的 git 工作树并在其中运行此会话；分支名由该消息生成。',
+  'hero.noGit': '无 git',
+  'hero.noGit.notRepository': '此文件夹不是 git 仓库，因此没有可切换的分支，也无法创建工作树。',
+  'hero.noGit.unavailable': '服务端无法运行 git，因此无法切换分支或创建工作树。',
+  'hero.noGit.unavailableBecause': '服务端无法运行 git：{reason}',
+  'hero.noGit.switchedOff': '分支与工作树控件已在“设置 → 插件 → 工作树与分支”中关闭。',
   'send.creating': '正在创建工作树…',
   'send.failed': '无法创建工作树：{message}',
   'send.moveFailed': '会话没有及时切换到新工作树，已撤销创建的工作树，你的消息没有发送。',
@@ -106,7 +111,7 @@ export const zh = {
   'error.retry': '重试',
 
   'settings.title': '工作树与分支',
-  'settings.description': '在会话标题栏显示当前分支与工作树，并在此切换、新建或删除它们。git 在服务端运行。',
+  'settings.description': '在输入框上方显示当前会话的分支与工作树，并在此切换、新建或删除它们。git 在服务端运行。',
   'settings.git': 'git',
   'settings.git.missing': '未检测到 git',
   'settings.git.hint': '所有 git 命令都在服务端执行；本插件不自带 git，使用的是主机 PATH 上的那一个。',
@@ -115,7 +120,7 @@ export const zh = {
   'settings.group.timing': '刷新与超时',
   'settings.group.safety': '安全',
   'settings.showChip': '显示工作树控件',
-  'settings.showChip.hint': '关闭后仍可通过设置修改配置，但会话标题栏不再显示该控件，新建会话页也不再提供“工作树”选项。',
+  'settings.showChip.hint': '关闭后仍可通过设置修改配置，但输入框上方不再显示该控件，新建会话页也不再提供“工作树”选项。',
   'settings.pathTemplate': '新工作树路径模板',
   'settings.pathTemplate.hint': '可用占位符：{repoRoot}、{repoParent}、{repo}、{branch}、{branchPath}。相对路径基于仓库根目录。',
   'settings.pathTemplate.invalid': '模板必须包含 {branch} 或 {branchPath}，否则每个工作树都会指向同一目录。',
@@ -130,7 +135,7 @@ export const zh = {
   'settings.maxBranches': '分支数量上限',
   'settings.maxBranches.hint': '单次读取返回的分支数上限；超出时列表会提示已截断。',
   'settings.refreshInterval': '自动刷新间隔（秒）',
-  'settings.refreshInterval.hint': '标题栏控件自动重新读取仓库的间隔。设为 0 表示只在手动刷新时读取。',
+  'settings.refreshInterval.hint': '输入框上方的控件自动重新读取仓库的间隔。设为 0 表示只在手动刷新时读取。',
   'settings.gitTimeout': 'git 超时（秒）',
   'settings.gitTimeout.hint': '本地 git 命令的时限。',
   'settings.networkTimeout': '网络超时（秒）',
@@ -160,6 +165,11 @@ export const en = {
   'hero.branch.base.tooltip': 'Branch the new worktree starts from',
   'hero.worktree': 'worktree',
   'hero.worktree.tooltip': 'When you send your first message, create a new git worktree from {branch} and run this session there. The branch is named from that message.',
+  'hero.noGit': 'no git',
+  'hero.noGit.notRepository': 'This folder is not a git repository, so there is no branch to switch and no worktree to create.',
+  'hero.noGit.unavailable': 'git cannot run on the host, so branches and worktrees are unavailable.',
+  'hero.noGit.unavailableBecause': 'git cannot run on the host: {reason}',
+  'hero.noGit.switchedOff': 'The branch and worktree control is switched off in Settings → Plugins → Worktrees and branches.',
   'send.creating': 'Creating worktree…',
   'send.failed': 'Could not create the worktree: {message}',
   'send.moveFailed': 'The session did not move to the new worktree in time, so the worktree was removed again and your message was not sent.',
@@ -248,7 +258,7 @@ export const en = {
   'error.retry': 'Retry',
 
   'settings.title': 'Worktrees and branches',
-  'settings.description': 'Shows the session\'s branch and worktree in the header, and switches, creates, or removes them from there. git runs on the host.',
+  'settings.description': 'Shows the session\'s branch and worktree above the composer, and switches, creates, or removes them from there. git runs on the host.',
   'settings.git': 'git',
   'settings.git.missing': 'git was not found',
   'settings.git.hint': 'Every git command runs on the host. This plugin ships no git of its own — it uses the one on the host\'s PATH.',
@@ -257,7 +267,7 @@ export const en = {
   'settings.group.timing': 'Refresh and timeouts',
   'settings.group.safety': 'Safety',
   'settings.showChip': 'Show the worktree control',
-  'settings.showChip.hint': 'Off keeps this card and its settings; the session header control goes away, and the new-session screen stops offering the worktree option.',
+  'settings.showChip.hint': 'Off keeps this card and its settings; the control above the composer goes away, and the new-session screen stops offering the worktree option.',
   'settings.pathTemplate': 'New worktree path',
   'settings.pathTemplate.hint': 'Placeholders: {repoRoot}, {repoParent}, {repo}, {branch}, {branchPath}. A relative result resolves against the repository root.',
   'settings.pathTemplate.invalid': 'The template needs {branch} or {branchPath}, or every worktree would expand to one directory.',
@@ -272,7 +282,7 @@ export const en = {
   'settings.maxBranches': 'Branch limit',
   'settings.maxBranches.hint': 'Most branches one reading returns; the list says so when it truncated.',
   'settings.refreshInterval': 'Auto-refresh (seconds)',
-  'settings.refreshInterval.hint': 'How often the header control re-reads the repository. 0 reads only on an explicit refresh.',
+  'settings.refreshInterval.hint': 'How often the control above the composer re-reads the repository. 0 reads only on an explicit refresh.',
   'settings.gitTimeout': 'git timeout (seconds)',
   'settings.gitTimeout.hint': 'Wall-clock bound for a local git command.',
   'settings.networkTimeout': 'Network timeout (seconds)',

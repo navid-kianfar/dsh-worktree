@@ -1,6 +1,7 @@
 /**
- * Worktree plugin, browser half. Two registrations: the chip in the session header's utilities seat,
- * and the worktree card on the plugin settings tab keyed by the `worktree` namespace.
+ * Worktree plugin, browser half. The branch and worktree row above the composer, the new-session
+ * project switcher and pill, the composer's first-send gate, the naming watcher in the session
+ * header, and the worktree card on the plugin settings tab keyed by the `worktree` namespace.
  *
  * Everything git goes over this plugin's own Remote namespace, because a page cannot run a process.
  * The two things the browser DOES own are the ones the Host cannot reach: which workspace the
@@ -14,7 +15,7 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { ClientContext, SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: the ctx.remote Context merge and the generated `worktree` namespace.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
-// Type-only: pulls the ui-conversation SlotMap merge (the session-header utilities seat).
+// Type-only: pulls the ui-conversation SlotMap merge (the input dock, hero, composer, and header seats).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -55,7 +56,7 @@ export type { RelativeAge } from './format.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
-    /** The session-header worktree chip's, both switchers', and the settings card's copy. */
+    /** The branch and worktree row's, both switchers', and the settings card's copy. */
     worktree: WorktreeKey
   }
 }
@@ -103,7 +104,7 @@ export async function apply(ctx: ClientContext): Promise<void> {
 }
 
 /**
- * Register the header chip and the settings card against a context that has the worktree namespace.
+ * Register every seat and the settings card against a context that has the worktree namespace.
  * @param ctx - the child fiber, with `remote.worktree` injected.
  */
 function surface(ctx: ClientContext): void {
@@ -214,10 +215,22 @@ function surface(ctx: ClientContext): void {
     unwrap(await session.openWorkspacePath({ action: 'reveal', path }))
   }
 
-  ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
-    name: 'conversation.session.header.utilities',
-    // List seats are addressed by id; the seat orders itself after the resident chrome.
+  /**
+   * The session's branch and worktree row, in the input dock: a full-width row of its own stacked
+   * directly above the composer card.
+   *
+   * Not the session header, where it used to be: the new-session pill sits just above the composer,
+   * and the control a session starts with should stay where it was once the session is running,
+   * beside the prompt it qualifies. The dock is also rendered on the blank new-session screen, so the
+   * chip itself renders nothing until the session has started — the hero's pill covers that screen.
+   * `order` 30 puts it after the core todo (0) and queue (20) entries, which makes it the row that
+   * touches the composer card.
+   */
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+    name: 'conversation.input.dock',
+    // List seats are addressed by id.
     id: 'worktree',
+    order: 30,
     locale: LOCALE_NS,
     inject: (): WorktreeChipInjected => ({
       describeWorktree,
@@ -297,7 +310,10 @@ function surface(ctx: ClientContext): void {
   }, WorktreeSendGate))
 
   // Renders nothing; it exists to sit in the session scope and give a new worktree its real name
-  // once the first prompt names the task. See the module doc for why that cannot happen earlier.
+  // once the first prompt names the task. See the module doc for why that cannot happen earlier. It
+  // stays in the header rather than following the chip to the dock: the dock is rendered inside the
+  // composer's fallback, which any routed `conversation.composer` replacement takes over, while the
+  // header is mounted for as long as the session is on screen.
   ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
     name: 'conversation.session.header.utilities',
     id: 'worktree-naming',

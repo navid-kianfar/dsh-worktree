@@ -84,7 +84,7 @@ export interface WorktreeCommands {
   pruneWorktrees: () => Promise<MutationResult>
 }
 
-/** Injected business face of the session-header chip. */
+/** Injected business face of the branch and worktree row above the composer. */
 export interface WorktreeChipInjected {
   /**
    * Read what this surface is allowed to draw and how often to re-read.

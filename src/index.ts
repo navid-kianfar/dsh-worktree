@@ -5,7 +5,7 @@
  * **As a plugin**, this is the worktree surface's node half. The apply is empty: the browser half
  * ships via `exports["./client"]` and is discovered through the package's `dsh.client` declaration.
  * That discovery resolves `<loader row name>/package.json`, so the row naming this plugin must be
- * the BARE package name — a subpath row (`.../host`) resolves nothing and the header seat is
+ * the BARE package name — a subpath row (`.../host`) resolves nothing and the browser seats are
  * silently never served.
  *
  * **As a library**, it re-exports the wire contract and the three pure vocabularies both halves

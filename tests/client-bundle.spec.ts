@@ -135,14 +135,14 @@ describe.skipIf(!built)('the built client bundle', () => {
   }
 
   /**
-   * Apply the bundle and build the header chip's injected face.
+   * Apply the bundle and build the branch and worktree row's injected face.
    * @param services - what `ctx.get` answers.
    * @returns the chip's face.
    */
   async function chipFace(services: Record<string, unknown>): Promise<Record<string, (...args: never[]) => unknown>> {
     const captured = await applyBundle(services)
     const chip = captured.find(entry =>
-      entry.name === 'conversation.session.header.utilities' && entry.options['id'] === 'worktree')
+      entry.name === 'conversation.input.dock' && entry.options['id'] === 'worktree')
     return (chip?.options['inject'] as () => Record<string, (...args: never[]) => unknown>)()
   }
 
@@ -151,12 +151,23 @@ describe.skipIf(!built)('the built client bundle', () => {
     const names = captured.map(entry =>
       `${entry.name}#${String(entry.options['id'] ?? entry.options['key'] ?? '')}`)
     expect(names).toEqual([
-      'conversation.session.header.utilities#worktree',
+      'conversation.input.dock#worktree',
       'conversation.hero.workspace#',
       'conversation.input.left#worktree-send-gate',
       'conversation.session.header.utilities#worktree-naming',
       'settings.plugin.item#worktree',
     ])
+  })
+
+  it('puts the chip above the composer and nowhere in the session header', async () => {
+    const captured = await applyBundle()
+    const chips = captured.filter(entry => entry.options['id'] === 'worktree')
+    expect(chips.map(entry => entry.name)).toEqual(['conversation.input.dock'])
+    // After the core todo (0) and queue (20) dock entries, so it is the row touching the composer.
+    expect(chips[0]?.options['order']).toBeGreaterThan(20)
+    // The only header occupant left is the naming watcher, which renders nothing.
+    const header = captured.filter(entry => entry.name.startsWith('conversation.session.header'))
+    expect(header.map(entry => entry.options['id'])).toEqual(['worktree-naming'])
   })
 
   it('takes the hero picker seat below the core registration', async () => {
@@ -180,7 +191,7 @@ describe.skipIf(!built)('the built client bundle', () => {
     }
     // The two git seats bind operations; the card owns settings instead and gets no command set.
     for (const key of [
-      'conversation.session.header.utilities#worktree',
+      'conversation.input.dock#worktree',
       'conversation.session.header.utilities#worktree-naming',
       'conversation.input.left#worktree-send-gate',
     ]) {

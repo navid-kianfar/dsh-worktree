@@ -2,12 +2,17 @@
 
 Git worktrees and branches for the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Web Client.
 
-A chip in the session header says which branch and which worktree the session is working in. Clicking either half opens a switcher; the `+` beside them creates a new worktree, adopts its directory as a harness Workspace, and opens a session there.
+Once a session has started, a slim row directly above the composer says which branch and which worktree it is working in. Clicking either half opens a switcher, upward; the `+` beside them creates a new worktree, adopts its directory as a harness Workspace, and opens a session there.
 
 ```
- ⑂ main ↑2 •  │  ⧉ my-repo  2      +
-   └ branch      └ worktree        └ new worktree
+ ⑂ main ↑2 • │ ⧉ my-repo 2   +
+   └ branch    └ worktree     └ new worktree
+ ╭──────────────────────────────────────────╮
+ │ Ask anything…                            │   ← the composer
+ ╰──────────────────────────────────────────╯
 ```
+
+The row is not drawn on the blank new-session screen — the pill below covers that screen — nor in a session whose folder is not a repository.
 
 The plugin also owns the **new-session row**, laid out like Claude Code's: where the session runs, in what mode, and on which branch. It takes that seat by shadowing the core workspace picker at a lower slot priority, so no harness source is patched and uninstalling the plugin hands the seat straight back.
 
@@ -16,6 +21,8 @@ The plugin also owns the **new-session row**, laid out like Claude Code's: where
    └ project        └ the harness's       └ branch   └ run in a new
      switcher         own mode chip                    git worktree
 ```
+
+Whenever a project is selected the pill holds that third place. While the first reading is on its way it is a neutral placeholder; for a folder that is not a git repository — or when git cannot run on the host, or the control is switched off — it stays, disabled, reading **no git**, with the reason in its tooltip.
 
 ## What it does
 
@@ -27,7 +34,7 @@ The plugin also owns the **new-session row**, laid out like Claude Code's: where
 
 **Branch** — the pill shows the branch the session will start on. With worktree unticked the session runs in the project folder, so picking a branch switches that folder to it; git refuses a switch that would lose uncommitted work, and the refusal is shown in the dropdown. With worktree ticked, the pick is the branch the new worktree starts from, and the project folder is left alone.
 
-**Worktree checkbox** — tick it and the session runs in a **fresh git worktree** instead of the repository itself. Ticking creates nothing. When you send the first message, the worktree is created from the chosen branch on a new branch **named from that message** — by your deployment's own model, falling back to a slug of the prompt — and the message is sent from inside it. Unticking before you send leaves nothing behind. A project that is not a git repository shows no pill at all.
+**Worktree checkbox** — tick it and the session runs in a **fresh git worktree** instead of the repository itself. Ticking creates nothing. When you send the first message, the worktree is created from the chosen branch on a new branch **named from that message** — by your deployment's own model, falling back to a slug of the prompt — and the message is sent from inside it. Unticking before you send leaves nothing behind. A project that is not a git repository shows the pill disabled as **no git**, and a worktree staged before that was known is unticked.
 
 **Uncommitted work is never discarded.** A checkout with local changes uses `git switch --merge`, which carries them across and aborts on conflict. A force-delete or force-remove is a separate switch, and by default also needs the branch or worktree name typed to confirm.
 
@@ -35,7 +42,7 @@ The plugin also owns the **new-session row**, laid out like Claude Code's: where
 
 - DeepSeek Harness with the `web` app.
 - `git` on the host process PATH. `git switch` is used, so **git 2.23 or newer**; git 2.36 adds the NUL-separated worktree listing this plugin prefers and the `locked`/`prunable` attributes it reads, and below that it falls back cleanly.
-- The `@deepseek-ai/dsh-subprocess` and `@deepseek-ai/dsh-fs` capabilities, both of which the base bundle mounts. Without either, the header control stays hidden and the settings card says which one is missing.
+- The `@deepseek-ai/dsh-subprocess` and `@deepseek-ai/dsh-fs` capabilities, both of which the base bundle mounts. Without either, the row above the composer stays hidden, the new-session pill reads **no git**, and the settings card says which one is missing.
 - A composed directory picker (`ui-directory-picker-native` or `-browse`, mounted automatically by the web app) for **Browse for folder…**. Without one the row reports that no chooser exists and everything else keeps working.
 - Optional: a default model (`agentDefaultModel`) for the worktree branch name. Without one the name is the deterministic slug of your prompt.
 
@@ -65,14 +72,14 @@ Every field is editable from **Settings → Plugins → Worktrees and branches**
 
 | Field | Default | What it does |
 | --- | --- | --- |
-| `showChip` | `true` | Render the session-header control. Off keeps the endpoints and this card. |
+| `showChip` | `true` | Render the branch and worktree row above the composer and an enabled new-session pill. Off keeps the endpoints and this card. |
 | `worktreePathTemplate` | `{repoParent}/{repo}-worktrees/{branch}` | Where a new worktree goes. See below. |
 | `branchPrefix` | `''` | Prefilled when creating a branch, e.g. `feature/`. |
 | `registerWorkspace` | `true` | Adopt a worktree's directory as a harness Workspace. |
 | `openSession` | `true` | Open a session in that Workspace. Requires `registerWorkspace`. |
 | `includeRemoteBranches` | `true` | List remote-tracking branches beside the local ones. |
 | `maxBranches` | `200` | Most branches one reading returns; the list says when it truncated. |
-| `refreshIntervalMs` | `15000` | How often the chip re-reads. `0` reads only on an explicit refresh. |
+| `refreshIntervalMs` | `15000` | How often the row re-reads. `0` reads only on an explicit refresh. |
 | `gitTimeoutMs` | `20000` | Bound for a local git command. |
 | `networkTimeoutMs` | `120000` | Bound for a command that contacts a remote. Never below `gitTimeoutMs`. |
 | `maxOutputBytes` | `1048576` | In-memory cap per captured git stream. |
@@ -102,6 +109,8 @@ The template must contain `{branch}` or `{branchPath}`; without one, every workt
 **Nothing here is model-facing.** Which branch you are on is operator context that never enters a prompt, so the plugin adds no tool, no prompt contribution, and no session event. The agent reaches git the way it always has: through the shell. The one model call this plugin makes is its own — naming a worktree's branch — and its answer reaches git as a branch name, never as prompt text.
 
 **The new-session seat is taken by shadowing, not by forking the shell.** `ui-workspace` registers `conversation.hero.workspace` at the default slot priority and this plugin registers the same single seat at `-1`, which is the slot system's documented shadowing rule: the lowest live entry renders. The shell's folder chip, its draft-carrying workspace switch, and the core mode chip all keep working. The mode chip is rendered by the shell after this seat; every slot wrapper is `display: contents`, so the branch pill takes a CSS `order` that places it after the mode chip.
+
+**The session's control sits above the composer, not in the header.** It takes `conversation.input.dock`, the harness's full-width row stacked above the composer card, at an `order` after the core todo and queue entries so it is the row touching the card. That is where the new-session pill sat before the first prompt, so the control does not move when the session starts, and it stays next to the prompt it qualifies. The shell also renders the dock on the blank new-session screen, so the row mirrors the shell's own phase rule and draws nothing until the session has left it. Its popovers open upward and are capped at the room above the row.
 
 **The worktree is made on the first send, because the harness offers no hook before one.** Input triggers only adjudicate drafts that start with `/`, and a command claim cannot be released once taken, so a small seat inside the composer card listens for Enter and the send button in the capture phase — and only while a worktree is staged, no trigger menu owns Enter, nothing is composing, and the harness's own send button is enabled. It locks the composer, names and creates the worktree, adopts it as a Workspace, and moves there through the same workspace switch a manual pick uses, which carries the draft and its attachments; the seat in the worktree's session then sends the carried draft with the composer's own submit. It confirms the session is still on screen before anything lasting and again before moving, and if the move does not land in time it removes the Workspace, worktree and branch again and restores the checkbox: nothing sent means nothing left behind.
 

@@ -18,8 +18,14 @@
  *   will start from, and the composer's send gate creates the worktree when the first prompt is sent,
  *   named from that prompt. Unticking before then leaves nothing behind.
  *
- * A project that is not a git repository gets no pill at all rather than an error box: there is no
- * branch to show and nothing to do about it.
+ * Once a project is selected the pill always holds the third place in the row, so the row reads the
+ * same for every project and never reflows when a reading lands:
+ *
+ * - **Still reading** — a neutral placeholder of the pill's shape, not interactive, not "no git": a
+ *   repository must never flash as unsupported before it has been read.
+ * - **Not a repository, git unavailable, or switched off** — the pill is drawn disabled, the branch
+ *   half reads "no git", the checkbox cannot be ticked, and the tooltip says why. No error box: there
+ *   is nothing to do about it here, but an absent control leaves people wondering where it went.
  * @module @achasoft/dsh-worktree/client/HeroWorkspace
  */
 
@@ -36,6 +42,7 @@ import type { WorktreeHeroInjected } from './contract.ts'
 import { branchLabel, elideMiddle } from './format.ts'
 import { PickerPopover, type PickerRow } from './PickerPopover.tsx'
 import { heroPicker, stagedSessions } from './staging.ts'
+import { heroPillState, type HeroPillState } from './surfaceState.ts'
 import { useWorktree } from './useWorktree.ts'
 import css from './surface.module.css'
 
@@ -110,16 +117,13 @@ export function HeroWorkspace(props: HeroWorkspaceProps) {
     selected: workspace.workspaceId === selectedId,
   }))
 
-  const repo = overview?.repo
-  // The pill needs a repository it can actually branch: no git, a folder that is not a repository,
-  // and a reading that has not landed yet all hide it rather than offering something it cannot do.
-  const pillOffered = selectedId !== undefined && view !== null && view.showChip && view.gitAvailable
-    && commands !== null && repo !== undefined
+  const pill = heroPillState({ hasProject: selectedId !== undefined, view, overview, failure })
+  const pillReady = pill.kind === 'ready'
+  const repo = pillReady ? pill.overview.repo : undefined
   // A staged worktree the project turns out not to support must not linger: the send gate acts on
-  // the staged choice, and with no pill on screen nobody could see or untick it. A reading that has
-  // merely not landed yet is not grounds — the pill comes back as soon as it does.
-  const unsupported = view !== null && (!view.showChip || !view.gitAvailable)
-    || failure?.code === 'not-a-repository'
+  // the staged choice, and a disabled checkbox cannot be unticked. A reading that has merely not
+  // landed yet is not grounds — the pill becomes interactive as soon as it does.
+  const unsupported = pill.kind === 'unsupported'
   useEffect(() => {
     if (unsupported && selectedId !== undefined) stagedSessions.clear(selectedId)
   }, [unsupported, selectedId])
@@ -183,7 +187,7 @@ export function HeroWorkspace(props: HeroWorkspaceProps) {
         }}
       />
 
-      {pillOffered && (
+      {pill.kind === 'ready' && (
         <span className={css.heroPill} role="group" aria-label={t('chip.aria')}>
           <Tooltip
             label={t(worktree ? 'hero.branch.base.tooltip' : 'hero.branch.tooltip')}
@@ -224,8 +228,12 @@ export function HeroWorkspace(props: HeroWorkspaceProps) {
         </span>
       )}
 
+      {pill.kind === 'loading' && <InertPill t={t} loading />}
+
+      {pill.kind === 'unsupported' && <InertPill t={t} reason={unsupportedTooltip(pill, t)} />}
+
       <PickerPopover
-        open={pillOffered && branchesOpen}
+        open={pillReady && branchesOpen}
         anchorRef={branchAnchor}
         onClose={closeBranches}
         rows={branchRows}
@@ -242,4 +250,62 @@ export function HeroWorkspace(props: HeroWorkspaceProps) {
       )}
     </>
   )
+}
+
+/**
+ * The tooltip for a disabled pill: the specific reason, in the operator's language.
+ * @param pill - the unsupported state.
+ * @param t - the locale seat.
+ * @returns the sentence to show.
+ */
+function unsupportedTooltip(
+  pill: Extract<HeroPillState, { kind: 'unsupported' }>,
+  t: HeroWorkspaceProps['t'],
+): string {
+  switch (pill.reason) {
+    case 'not-a-repository': return t('hero.noGit.notRepository')
+    case 'switched-off': return t('hero.noGit.switchedOff')
+    case 'unavailable':
+      return pill.detail === undefined ? t('hero.noGit.unavailable') : t('hero.noGit.unavailableBecause', { reason: pill.detail })
+  }
+}
+
+/**
+ * The pill's shape with nothing to act on: the loading placeholder, or the disabled "no git" pill.
+ *
+ * One component for both so they are the same size as each other and as the live pill — the row
+ * holds its layout through all three. Nothing inside is a button: the branch half is text, and the
+ * checkbox is a disabled native box, so keyboard and pointer users meet one inert control rather than
+ * a button that does nothing. The tooltip hangs off the pill itself, which stays focusable when
+ * disabled so the reason is reachable without a mouse — a disabled control receives no hover events
+ * in some engines, and no focus in any.
+ * @param props.t - the locale seat.
+ * @param props.loading - render the placeholder rather than the disabled pill.
+ * @param props.reason - the disabled pill's tooltip.
+ * @returns the inert pill.
+ */
+function InertPill({ t, loading = false, reason }: { t: HeroWorkspaceProps['t']; loading?: boolean; reason?: string }) {
+  const body = (
+    <span
+      className={loading ? css.heroPillLoading : css.heroPillDisabled}
+      role="group"
+      aria-label={t('chip.aria')}
+      aria-disabled="true"
+      {...loading ? { 'aria-busy': true } : { tabIndex: 0 }}
+    >
+      <span className={css.heroPillStatic}>
+        <IconBranchOutline16 className={css.heroIcon} size={14} />
+        {loading
+          ? <span className={css.heroPlaceholder} aria-hidden="true" />
+          : <span className={css.heroText}>{t('hero.noGit')}</span>}
+      </span>
+      <span className={css.heroPillDivider} aria-hidden="true" />
+      <label className={css.heroPillStaticCheck}>
+        <input type="checkbox" className={css.heroCheckBox} checked={false} disabled readOnly />
+        <span className={css.heroText}>{t('hero.worktree')}</span>
+      </label>
+    </span>
+  )
+  if (loading || reason === undefined) return body
+  return <Tooltip label={reason} side="bottom" delayMs={250}>{body}</Tooltip>
 }

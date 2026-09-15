@@ -2,12 +2,12 @@
 #
 # Both rows are always composed. Unlike a provider-backed capability there is
 # nothing deployment-specific to supply: the plugin reads whatever repository
-# each workspace already sits in, and a workspace that is not one renders no
-# control at all rather than a dead one.
+# each workspace already sits in. A workspace that is not one gets no row above
+# the composer, and a disabled "no git" pill on the new-session screen.
 #
 # It does need two capabilities the base bundle already mounts — `ctx.subprocess`
 # to run git and `ctx.fs` to resolve paths. Without either, the settings card
-# says which one is missing and the header control stays hidden.
+# says which one is missing and the row above the composer stays hidden.
 #
 # Override any key from your profile's own cordis.patch.yml by `id`, restating
 # every key the row needs — a patch replaces a row's whole `config`.
@@ -15,8 +15,8 @@
     - id: worktree
       name: '@achasoft/dsh-worktree/host'
       config:
-        # Draw the worktree surface at all: the session-header chip, and the "Worktree" checkbox on
-        # the new-session screen. Off leaves every endpoint callable and the settings card intact —
+        # Draw the worktree surface at all: the branch and worktree row above the composer, and the
+        # "Worktree" checkbox on the new-session screen. Off leaves every endpoint callable and the settings card intact —
         # the project switcher and Open Workspace on that screen stay, because they are the seat
         # this plugin shadows rather than a worktree control of its own.
         showChip: true
@@ -48,7 +48,7 @@
         # list says so when it truncated; the search box reaches the rest.
         maxBranches: 200
 
-        # How often the header control re-reads. git status on a warm repository
+        # How often the row above the composer re-reads. git status on a warm repository
         # is cheap, and this is what keeps the dirty dot and ahead/behind honest
         # while the agent works. 0 reads only on an explicit refresh.
         refreshIntervalMs: 15000
@@ -70,6 +70,6 @@
 
     # The BARE package name, deliberately: the Web Client discovers a browser half
     # by resolving `<row name>/package.json`, so a subpath row here would leave the
-    # header seat silently unserved.
+    # browser seats silently unserved.
     - id: worktree-ui
       name: '@achasoft/dsh-worktree'

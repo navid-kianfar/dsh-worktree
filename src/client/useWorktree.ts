@@ -80,12 +80,22 @@ export function useWorktree(
     return () => { controller.abort() }
   }, [describeWorktree])
 
+  // The command set the held reading was taken with. A new set means a different directory, and a
+  // reading of the previous one must not stand in for it: the new-session pill would otherwise show
+  // the last project's branch — or its "not a repository" — until the new reading lands, and the
+  // staged-worktree cleanup would act on the new project because of the old one's failure. Reset
+  // during render rather than in an effect, so no commit ever pairs the new directory with the old
+  // reading: React discards this render and re-runs it with the cleared state before anything paints
+  // or any effect reads it.
+  const [readFor, setReadFor] = useState<WorktreeCommands | null>(commands)
+  if (readFor !== commands) {
+    setReadFor(commands)
+    setOverview(null)
+    setFailure(null)
+  }
+
   useEffect(() => {
-    if (commands === null) {
-      setOverview(null)
-      setFailure(null)
-      return undefined
-    }
+    if (commands === null) return undefined
     const controller = new AbortController()
     setBusy(true)
     void commands.overview(controller.signal).then((result) => {
